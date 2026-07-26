@@ -190,10 +190,10 @@ class TestResolveEffectList:
         assert resolved == ["reverb=50"]
 
     def test_expands_builtin_preset(self):
-        resolved = resolve_effect_list(["robot"], {})
-        # robot = overdrive=20, pitch=-100, reverb=10
+        resolved = resolve_effect_list(["telephone"], {})
+        # telephone = bandpass=300:3400, overdrive=5, vol=1.3
         assert len(resolved) >= 2
-        assert "overdrive=20" in resolved
+        assert "overdrive=5" in resolved
 
     def test_expands_user_preset(self):
         config = {"effects": {"presets": {"my_preset": ["reverb=40", "bass=3"]}}}
@@ -203,14 +203,14 @@ class TestResolveEffectList:
 
     def test_user_preset_overrides_builtin(self):
         # User can override a builtin preset name
-        config = {"effects": {"presets": {"robot": ["pitch=100"]}}}
-        resolved = resolve_effect_list(["robot"], config)
+        config = {"effects": {"presets": {"telephone": ["pitch=100"]}}}
+        resolved = resolve_effect_list(["telephone"], config)
         assert resolved == ["pitch=100"]
 
     def test_mixed_effects_and_presets(self):
-        resolved = resolve_effect_list(["robot", "reverb=20"], {})
+        resolved = resolve_effect_list(["telephone", "reverb=20"], {})
         assert "reverb=20" in resolved
-        assert "overdrive=20" in resolved  # from robot preset
+        assert "overdrive=5" in resolved  # from telephone preset
 
     def test_empty_list(self):
         assert resolve_effect_list([], {}) == []
@@ -302,22 +302,20 @@ class TestPresets:
         # These curated presets were added alongside the new EQ/dynamics effects.
         expected = {
             "broadcaster", "podcast", "trailer", "audiobook", "walkie_talkie",
-            "vintage_radio", "intercom", "underwater", "alien", "ethereal", "dragon",
+            "vintage_radio", "intercom", "underwater", "ai", "ethereal", "dragon",
         }
         assert expected.issubset(BUILTIN_PRESETS.keys())
 
     def test_android_port_presets_present(self):
         # Ports of the Android app's Android-only stackups (BuiltinEffects E-L).
         assert {"cyborg", "eight_bit", "glitch"}.issubset(BUILTIN_PRESETS.keys())
-        # 'ai' is deliberately NOT ported (Monotone has no sox equivalent).
-        assert "ai" not in BUILTIN_PRESETS
 
     def test_removed_presets_no_longer_builtin(self):
         # whisper/slow_deep/fast_high were removed; they should not resolve
         # as builtin presets anymore. resolve_effect_list passes unknown
         # names through unchanged, and build_sox_args then rejects them
         # as unknown effects.
-        for name in ("whisper", "slow_deep", "fast_high"):
+        for name in ("whisper", "slow_deep", "fast_high", "robot", "alien"):
             assert name not in BUILTIN_PRESETS
             resolved = resolve_effect_list([name], {})
             assert resolved == [name]
@@ -411,7 +409,7 @@ class TestListEffects:
     def test_shows_presets(self, capsys):
         list_effects()
         captured = capsys.readouterr()
-        assert "robot" in captured.out
+        assert "telephone" in captured.out
         assert "cave" in captured.out
 
     def test_shows_user_presets(self, capsys):

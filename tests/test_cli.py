@@ -130,7 +130,7 @@ def test_list_effects_flag(capsys):
         main()
     captured = capsys.readouterr()
     assert "reverb" in captured.out
-    assert "robot" in captured.out
+    assert "cave" in captured.out
 
 
 # ── --list-rules ──────────────────────────────────────────────────────────────

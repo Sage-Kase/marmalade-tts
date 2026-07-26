@@ -25,8 +25,7 @@ A short demo and a few effect samples (download and play with `paplay`,
 | [`demos/tahlia-voice-sample/tahlia-intro.wav`](demos/tahlia-voice-sample/tahlia-intro.wav) | Capability-demo clip generated to show off marmalade-tts |
 | [`samples/effects/baseline-F.wav`](samples/effects/baseline-F.wav) | Kitten voice, no effects (reference) |
 | [`samples/effects/cave-01-F.wav`](samples/effects/cave-01-F.wav) | `--effect cave` (heavy reverb + echo) |
-| [`samples/effects/robot-01-F.wav`](samples/effects/robot-01-F.wav) | `--effect robot` (overdrive + pitch + reverb) |
-| [`samples/effects/chipmunk-01-F.wav`](samples/effects/chipmunk-01-F.wav) | `--effect chipmunk` (pitch up + faster) |
+| [`samples/effects/chipmunk-01-F.wav`](samples/effects/chipmunk-01-F.wav) | `--effect chipmunk` (pitch way up) |
 | [`samples/effects/deep-01-F.wav`](samples/effects/deep-01-F.wav) | `--effect deep` (pitch down + bass) |
 | [`samples/effects/alien-01-classic-F.wav`](samples/effects/alien-01-classic-F.wav) | Custom alien chain |
 | [`samples/effects/ghost-02-echo-F.wav`](samples/effects/ghost-02-echo-F.wav) | Custom ghost chain |
@@ -452,7 +451,6 @@ marmalade-tts "Hello" --effect pitch=-300   # shift down 3 semitones
 marmalade-tts "Hello" --effect pitch=200 --effect reverb=30
 
 # Use a built-in preset
-marmalade-tts "Hello" --effect robot
 marmalade-tts "Hello" --effect cave
 marmalade-tts "Hello" --effect telephone
 
@@ -464,26 +462,25 @@ marmalade-tts --list-effects
 
 | Preset | Effects applied |
 |--------|----------------|
-| `robot` | overdrive + pitch shift + reverb |
 | `cave` | heavy reverb + echo |
-| `chipmunk` | pitch up + slightly faster |
+| `chipmunk` | pitch way up (+9 semitones) |
 | `deep` | pitch down + bass boost |
 | `telephone` | bandpass filter + overdrive |
 | `stadium` | heavy reverb + echo |
-| `megaphone` | bandpass + heavy overdrive + volume boost |
+| `megaphone` | bandpass + heavy overdrive |
 | `broadcaster` | radio-DJ polish — low cut, mud cut, compression, presence |
 | `podcast` | warm, intimate — low cut, warmth, gentle compression |
 | `trailer` | deep cinematic VO — pitch down, compression, controlled reverb |
 | `audiobook` | even narration — low cut, compression, clarity, hint of room |
-| `walkie_talkie` | handheld radio — tight band, drive, hard squash |
+| `walkie_talkie` | handheld radio — tight band, hard drive, bit-crush grit, hard squash |
 | `vintage_radio` | old AM radio — HP/LP 400-4kHz band, +12 dB mid honk at 1 kHz, tube saturation, leveling compression, subtle AM throb, cabinet reverb |
 | `intercom` | PA / intercom — midrange horn, heavy drive, room slap |
 | `underwater` | submerged — dark low-pass, chorus, pitch + wobble |
-| `alien` | otherworldly — pitch up, phaser + flanger, big space |
+| `ai` | synthetic — pitch up, phaser + flanger sweep, big space |
 | `ethereal` | ethereal haunt — thin lows, pitch shimmer, long reverb |
-| `dragon` | monster — chest, growl, grit, doubled chorus, cavern reverb |
+| `dragon` | monster — cavern first, then dropped most of an octave and slowed |
 | `cyborg` | Dalek/cyborg — ring mod through a telephone band + grit |
-| `eight_bit` | 8-bit retro game voice — heavy crush + makeup |
+| `eight_bit` | retro game voice — band-limit, then 7-bit / 8× crush |
 | `glitch` | glitchy lo-fi transmission — crush + ring shimmer through a radio band |
 
 `cyborg`, `eight_bit`, and `glitch` mirror the built-in effects in the

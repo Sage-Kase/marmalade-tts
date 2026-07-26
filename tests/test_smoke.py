@@ -81,7 +81,7 @@ class TestCLISmoke:
         r = self._cli(["--list-effects"])
         assert r.returncode == 0
         assert "reverb" in r.stdout
-        assert "robot" in r.stdout
+        assert "cave" in r.stdout
 
     def test_list_rules(self):
         r = self._cli(["--list-rules"])
@@ -201,16 +201,16 @@ class TestEffectsSmoke:
         assert os.path.exists(out_wav)
         assert os.path.getsize(out_wav) > 0
 
-    def test_apply_preset_robot(self, tmp_path):
+    def test_apply_preset_cave(self, tmp_path):
         from marmalade_tts.effects import apply_effects
 
         in_wav = str(tmp_path / "silent.wav")
-        out_wav = str(tmp_path / "robot.wav")
+        out_wav = str(tmp_path / "cave.wav")
         subprocess.run(
             ["sox", "-n", "-r", "24000", "-c", "1", in_wav, "trim", "0.0", "0.5"],
             check=True
         )
-        apply_effects(in_wav, out_wav, ["robot"], {})
+        apply_effects(in_wav, out_wav, ["cave"], {})
         assert os.path.exists(out_wav)
 
     def test_chain_multiple_effects(self, tmp_path):

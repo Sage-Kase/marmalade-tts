@@ -39,7 +39,7 @@ Thin wrapper for shell pipelines — always reads from stdin, never plays automa
 
 ```sh
 echo "Hello world" | marmalade-pipe
-cat article.txt | marmalade-pipe --effect robot
+cat article.txt | marmalade-pipe --effect cave
 cat notes.txt | marmalade-pipe --out spoken.wav
 cat README.md | marmalade-pipe --quiet --out out.wav && aplay out.wav
 ```

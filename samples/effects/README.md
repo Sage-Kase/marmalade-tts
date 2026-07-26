@@ -16,7 +16,6 @@ ffplay samples/effects/cave-01-F.wav
 |------|---------------------|
 | `baseline-F.wav` | `marmalade-tts kitten Kiki "<text>" --out baseline-F.wav` |
 | `cave-01-F.wav` | `marmalade-tts kitten Kiki "<text>" --effect cave --out cave-01-F.wav` |
-| `robot-01-F.wav` | `marmalade-tts kitten Kiki "<text>" --effect robot --out robot-01-F.wav` |
 | `chipmunk-01-F.wav` | `marmalade-tts kitten Kiki "<text>" --effect chipmunk --out chipmunk-01-F.wav` |
 | `deep-01-F.wav` | `marmalade-tts kitten Kiki "<text>" --effect deep --out deep-01-F.wav` |
 | `alien-01-classic-F.wav` | Custom chain — see below |

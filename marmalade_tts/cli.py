@@ -620,7 +620,7 @@ Examples:
     # Misc
     parser.add_argument("--effect", metavar="EFFECT", action="append", dest="effects",
                         help="Apply audio effect after synthesis (repeatable). "
-                             "Format: name or name=value, e.g. reverb=50, pitch=200, robot. "
+                             "Format: name or name=value, e.g. reverb=50, pitch=200, cave. "
                              "Run --list-effects to see all effects and presets.")
     parser.add_argument("--no-effects", action="store_true",
                         help="Skip all effects, including engine defaults from config.")

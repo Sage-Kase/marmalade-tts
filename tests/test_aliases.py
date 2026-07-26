@@ -196,8 +196,8 @@ class TestAliasEffects:
                         "effects": ["pitch=-200", "reverb=40"]},
         })
         seen = self._run_capturing_effects(
-            ["marmalade-tts", "villain", "boo", "--effect", "robot"], cfg)
-        assert seen["effects"] == ["robot"]
+            ["marmalade-tts", "villain", "boo", "--effect", "cave"], cfg)
+        assert seen["effects"] == ["cave"]
 
     def test_no_effects_flag_kills_alias_effects(self):
         cfg = _cfg_with_aliases({
