@@ -511,7 +511,7 @@ marmalade-tts --list-effects
 | `phaser` | speed:decay | `phaser=0.5:0.4` |
 | `compressor` | threshold_dB:ratio | `compressor=-20:4` |
 | `ringmod` | freq:mix (mix 0-1, Dalek/cyborg timbre) | `ringmod=60:0.7` |
-| `bitcrush` | bits:factor (lo-fi crush) | `bitcrush=6:6` |
+| `bitcrush` | bits:factor — quantize to `bits`, then hold every `factor` samples (`factor=1` = bit crush only) | `bitcrush=6:6` |
 
 ### Default effects per engine
 

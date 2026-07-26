@@ -3,7 +3,9 @@ Audio effects post-processing for marmalade-tts.
 
 Effects are applied after synthesis using sox. Each effect is a named
 transformation with optional parameters. Multiple effects are chained
-in a single sox invocation.
+in a single sox invocation — except `bitcrush`, whose bit-depth
+quantization needs a 16-bit file to round through and so splits the
+chain in two (see build_sox_stages).
 
 Built-in presets combine effects for common use cases (cave, telephone, etc.).
 Custom presets can be defined in config under effects.presets.
