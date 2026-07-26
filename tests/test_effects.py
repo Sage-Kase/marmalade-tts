@@ -9,11 +9,17 @@ from unittest.mock import patch, MagicMock
 
 from marmalade_tts.effects import (
     EFFECTS, BUILTIN_PRESETS,
-    sox_available, resolve_effect_list, build_sox_args, apply_effects,
+    sox_available, resolve_effect_list, build_sox_stages, apply_effects,
     list_effects, _parse_spec, _parse_echo, _parse_bandpass, _parse_chorus,
     _parse_fade, _parse_mid, _parse_tremolo, _parse_phaser, _parse_compressor,
     _parse_ringmod, _parse_bitcrush,
 )
+
+
+def build_sox_args(specs):
+    """Flatten build_sox_stages — every chain here is a single stage unless it
+    bitcrushes, and the stage split has its own tests."""
+    return [arg for stage in build_sox_stages(specs) for arg in stage]
 
 
 # ── _parse_spec ───────────────────────────────────────────────────────────────
@@ -160,26 +166,57 @@ class TestParsers:
             _parse_ringmod("60")
 
     def test_bitcrush_default(self):
-        args = _parse_bitcrush(None)
-        # bits=6, factor=6: crush + limited makeup gain (20*log10(6) ~ 15.56 dB) + grit
-        assert args[:4] == ["downsample", "6", "upsample", "6"]
-        assert args[4:6] == ["gain", "-l"]
-        assert float(args[6]) == pytest.approx(15.56, abs=0.01)
-        assert args[7:] == ["overdrive", "8"]
+        # bits=6, factor=6. The quantize scales down by 2^(6-15) then back up;
+        # the resample crush + limited makeup gain (20*log10(6) ~ 15.56 dB)
+        # ride in the opening stage.
+        closing, opening = _parse_bitcrush(None)
+        assert closing == ["vol", str(2 ** -9)]
+        assert opening[:2] == ["vol", "512"]
+        assert opening[2:6] == ["downsample", "6", "upsample", "6"]
+        assert opening[6:8] == ["gain", "-l"]
+        assert float(opening[8]) == pytest.approx(15.56, abs=0.01)
 
-    def test_bitcrush_factor_one_is_grit_only(self):
-        # factor 1: no resample stage, just the bits-derived overdrive
-        assert _parse_bitcrush("12:1") == ["overdrive", "3.2"]
+    def test_bitcrush_factor_one_is_quantize_only(self):
+        # factor 1: no resample crush, just the bit-depth quantize
+        closing, opening = _parse_bitcrush("12:1")
+        assert closing == ["vol", str(2 ** -3)]
+        assert opening == ["vol", "8"]
 
-    def test_bitcrush_sixteen_bits_no_grit(self):
-        # bits=16 -> no overdrive; factor 2 -> resample stage only
-        args = _parse_bitcrush("16:2")
-        assert "overdrive" not in args
-        assert args[:4] == ["downsample", "2", "upsample", "2"]
+    def test_bitcrush_sixteen_bits_needs_no_stage_split(self):
+        # The output file is already 16-bit, so there is nothing to round
+        # through — no boundary, resample crush only.
+        closing, opening = _parse_bitcrush("16:2")
+        assert closing == []
+        assert opening[:4] == ["downsample", "2", "upsample", "2"]
 
     def test_bitcrush_bad_format(self):
         with pytest.raises(ValueError):
             _parse_bitcrush("6")
+
+
+# ── build_sox_stages ──────────────────────────────────────────────────────────
+
+class TestBuildSoxStages:
+    def test_chain_without_bitcrush_is_one_stage(self):
+        assert build_sox_stages(["reverb=30", "pitch=100"]) == [
+            ["reverb", "30", "pitch", "100"]
+        ]
+
+    def test_bitcrush_splits_the_chain(self):
+        # Everything before the crush closes stage 1 with the scale-down;
+        # stage 2 opens with the scale-up, so the 16-bit file between them
+        # does the quantizing.
+        stages = build_sox_stages(["lowpass=3446", "bitcrush=7:8", "vol=1.2"])
+        assert len(stages) == 2
+        assert stages[0] == ["lowpass", "3446", "vol", str(2 ** -8)]
+        assert stages[1][:2] == ["vol", "256"]
+        assert stages[1][-2:] == ["vol", "1.2"]
+
+    def test_two_bitcrushes_make_three_stages(self):
+        assert len(build_sox_stages(["bitcrush=8:1", "bitcrush=4:1"])) == 3
+
+    def test_empty_chain_is_one_empty_stage(self):
+        assert build_sox_stages([]) == [[]]
 
 
 # ── resolve_effect_list ───────────────────────────────────────────────────────
@@ -355,8 +392,8 @@ class TestApplyEffects:
         calls = []
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
-            # Write something to the target (3rd arg after sox + input)
-            target = cmd[2]
+            # sox -D <in> <out> <effects...>
+            target = cmd[3]
             with open(target, "wb") as f:
                 f.write(b"RIFF" + b"\x00" * 40)
             r = MagicMock()
@@ -370,8 +407,8 @@ class TestApplyEffects:
         assert len(calls) == 1
         # The temp path used should NOT be the same as the input
         sox_cmd = calls[0]
-        assert sox_cmd[1] == str(wav)      # input
-        assert sox_cmd[2] != str(wav)      # output was temp file
+        assert sox_cmd[2] == str(wav)      # input
+        assert sox_cmd[3] != str(wav)      # output was temp file
         # Original file should still exist (renamed from temp)
         assert wav.exists()
 
@@ -384,7 +421,7 @@ class TestApplyEffects:
         calls = []
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
-            with open(cmd[2], "wb") as f:
+            with open(cmd[3], "wb") as f:
                 f.write(b"RIFF" + b"\x00" * 40)
             r = MagicMock()
             r.returncode = 0
@@ -394,7 +431,7 @@ class TestApplyEffects:
             with patch("subprocess.run", side_effect=fake_run):
                 apply_effects(str(in_wav), str(out_wav), ["pitch=200"], {})
 
-        assert calls[0][2] == str(out_wav)
+        assert calls[0][3] == str(out_wav)
 
 
 # ── list_effects ──────────────────────────────────────────────────────────────

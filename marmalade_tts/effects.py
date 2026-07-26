@@ -75,7 +75,7 @@ EFFECTS = {
     "ringmod":  (lambda p: _parse_ringmod(p),
                  "Ring modulator (Dalek/cyborg timbre)",                    "freq:mix, e.g. 60:0.7 (mix 0-1)"),
     "bitcrush": (lambda p: _parse_bitcrush(p),
-                 "Lo-fi crush — sample-rate crush + digital grit",          "bits:factor, e.g. 6:6 (factor 1 = grit only)"),
+                 "Lo-fi crush — bit-depth quantize + sample-rate crush",    "bits:factor, e.g. 6:6 (factor 1 = bit crush only)"),
 }
 
 
@@ -113,7 +113,7 @@ BUILTIN_PRESETS = {
                     "tremolo=3:0.25", "treble=3"],
     # Reverb first: the whole wet signal gets pitched down and dragged to
     # 0.85×, so the tail reads as a huge slow throat rather than a room.
-    "dragon":      ["reverb=45", "pitch=-649", "bass=0", "mid=1058:-2",
+    "dragon":      ["reverb=45", "pitch=-649", "mid=1058:-2",
                     "overdrive=7", "chorus", "tempo=0.85"],
     # Ports of marmalade-tts-android's Android-only stackups (BuiltinEffects
     # E-L), block-for-block in the app's order.
@@ -237,17 +237,23 @@ def _parse_ringmod(p) -> list:
     return ["tremolo", freq, str(float(mix) * 100)]
 
 
-def _parse_bitcrush(p) -> list:
-    """bitcrush=6:6  →  ['downsample', '6', 'upsample', '6', 'gain', ...]
+def _parse_bitcrush(p) -> tuple[list, list]:
+    """bitcrush=6:6  →  (args closing this sox stage, args opening the next)
 
-    Port of the Android app's Bitcrush block (quantize to `bits` bit depth +
-    sample-and-hold every `factor` samples). sox processes in floating point,
-    so true in-chain bit-depth quantization is impossible; the sample-rate
-    crush (downsample/upsample, which dominates the lo-fi character) is exact
-    in spirit, and the bit-depth grit is approximated with a small overdrive
-    scaled from `bits` ((16 - bits) * 0.8 dB, none at 16). The limited gain
-    stage (`gain -l`) makes up the 1/factor level lost to upsample's
-    zero-stuffing without hard-clipping the peaks it preserves.
+    Port of the Android app's BitcrushProcessor: quantize to `bits` bit depth,
+    then sample-and-hold every `factor` samples.
+
+    sox has no quantizer effect — but writing a WAV *is* one, since samples
+    land on 16-bit steps. So quantizing to `bits` is: scale down by
+    2^(bits-15), let the intermediate file round, scale back up. That gives
+    exactly the app's round(x · 2^bits) / 2^bits, and it's why this returns a
+    pair — the file boundary splits the chain (see build_sox_stages).
+
+    The sample-rate crush then runs in the next stage. sox's `upsample`
+    zero-stuffs rather than sample-and-holds, so its images are brighter than
+    the app's hold — same family of artifact — and the limited gain stage
+    (`gain -l`) makes up the 1/factor level the zeros cost without
+    hard-clipping the peaks they preserve.
     """
     bits, factor = 6.0, 6
     if p:
@@ -255,15 +261,16 @@ def _parse_bitcrush(p) -> list:
         if len(parts) != 2:
             raise ValueError(f"bitcrush expects bits:factor, got: {p!r}")
         bits, factor = float(parts[0]), int(parts[1])
-    args = []
+    crush = []
     if factor > 1:
         makeup = 20 * math.log10(factor)
-        args += ["downsample", str(factor), "upsample", str(factor),
+        crush = ["downsample", str(factor), "upsample", str(factor),
                  "gain", "-l", f"{makeup:.2f}"]
-    grit = (16 - bits) * 0.8
-    if grit > 0:
-        args += ["overdrive", f"{grit:g}"]
-    return args
+    if bits >= 16:
+        # The output file is 16-bit anyway — nothing to quantize, no boundary.
+        return [], crush
+    step = 2.0 ** (bits - 15)
+    return ["vol", f"{step:.10g}"], ["vol", f"{1 / step:.10g}"] + crush
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -309,20 +316,36 @@ def _parse_spec(spec: str) -> tuple[str, object]:
     return spec.strip(), None
 
 
-def build_sox_args(effect_specs: list[str]) -> list[str]:
-    """Build the sox effect chain args from a list of resolved specs.
+def build_sox_stages(effect_specs: list[str]) -> list[list[str]]:
+    """Build the sox effect chain from a list of resolved specs.
 
-    Returns a list suitable for appending to a sox command, e.g.:
-      ['reverb', '50', 'pitch', '200', 'norm']
+    Returns one list of sox args per sox invocation, e.g.:
+      [['reverb', '50', 'pitch', '200', 'norm']]
+
+    Almost always a single stage. `bitcrush` is the exception: its bit-depth
+    quantization needs a 16-bit file to round through, so it splits the chain
+    at that point and the caller runs the stages back to back through temp
+    files (see _parse_bitcrush and apply_effects).
     """
-    args = []
+    stages = []
+    current = []
     for spec in effect_specs:
         name, value = _parse_spec(spec)
         if name not in EFFECTS:
             raise ValueError(f"Unknown effect: {name!r}. Run --list-effects to see available effects.")
         builder, _desc, _hint = EFFECTS[name]
-        args.extend(builder(value))
-    return args
+        if name == "bitcrush":
+            # The only effect that returns a stage boundary rather than args.
+            closing, opening = builder(value)
+            if closing:
+                stages.append(current + closing)
+                current = list(opening)
+            else:
+                current.extend(opening)
+        else:
+            current.extend(builder(value))
+    stages.append(current)
+    return stages
 
 
 def apply_effects(in_path: str, out_path: str, effect_specs: list[str], config: dict = None):
@@ -350,27 +373,36 @@ def apply_effects(in_path: str, out_path: str, effect_specs: list[str], config: 
             "Install it: apt install sox   or   brew install sox"
         )
 
-    sox_chain = build_sox_args(resolved)
+    stages = build_sox_stages(resolved)
 
-    # If in_path == out_path, write to a temp file first then rename
+    # One sox invocation per stage, threaded through temp files. A chain
+    # without bitcrush is a single stage straight from in_path to out_path;
+    # in_path == out_path also needs a temp file to land in.
     same_file = os.path.realpath(in_path) == os.path.realpath(out_path)
-    if same_file:
-        fd, tmp_path = tempfile.mkstemp(suffix=".wav")
-        os.close(fd)
-        target = tmp_path
-    else:
-        target = out_path
-
-    cmd = ["sox", in_path, target] + sox_chain
+    temps = []
     try:
-        proc = subprocess.run(cmd, capture_output=True)
-        if proc.returncode != 0:
-            err = proc.stderr.decode(errors="replace").strip()
-            raise RuntimeError(f"sox failed:\n{err}")
+        src = in_path
+        for i, stage in enumerate(stages):
+            final = i == len(stages) - 1
+            if final and not same_file:
+                dst = out_path
+            else:
+                fd, dst = tempfile.mkstemp(suffix=".wav")
+                os.close(fd)
+                temps.append(dst)
+            # -D: never auto-dither. Intermediates are forced to 16-bit
+            # because bitcrush's quantization is done BY that rounding.
+            cmd = ["sox", "-D", src] + ([] if final else ["-b", "16"]) + [dst] + stage
+            proc = subprocess.run(cmd, capture_output=True)
+            if proc.returncode != 0:
+                err = proc.stderr.decode(errors="replace").strip()
+                raise RuntimeError(f"sox failed:\n{err}")
+            src = dst
         if same_file:
             # shutil.move (not os.replace) — handles cross-filesystem moves
             # (e.g. tmpfs /tmp → ext4 home dir, which os.replace can't do).
-            shutil.move(tmp_path, out_path)
+            temps.remove(src)
+            shutil.move(src, out_path)
             # tempfile.mkstemp creates with 0600; restore the user's default umask
             # so the final output is readable like any other file they create.
             try:
@@ -379,13 +411,12 @@ def apply_effects(in_path: str, out_path: str, effect_specs: list[str], config: 
                 os.chmod(out_path, 0o666 & ~umask)
             except OSError:
                 pass
-    except Exception:
-        if same_file and os.path.exists(tmp_path):
+    finally:
+        for path in temps:
             try:
-                os.unlink(tmp_path)
+                os.unlink(path)
             except OSError:
                 pass
-        raise
 
 
 def list_effects(user_presets: dict = None):
