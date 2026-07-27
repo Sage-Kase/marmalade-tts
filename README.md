@@ -479,6 +479,7 @@ marmalade-tts --list-effects
 | `ai` | synthetic — pitch up, phaser + flanger sweep, big space |
 | `ethereal` | ethereal haunt — thin lows, pitch shimmer, long reverb |
 | `dragon` | monster — cavern first, then dropped most of an octave and slowed |
+| `next_room` | heard through a closed door — room first, then muffled with it |
 | `cyborg` | Dalek/cyborg — ring mod through a telephone band + grit |
 | `eight_bit` | retro game voice — band-limit, then 7-bit / 8× crush |
 | `glitch` | glitchy lo-fi transmission — crush + ring shimmer through a radio band |
