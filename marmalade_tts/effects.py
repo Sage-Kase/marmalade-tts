@@ -108,10 +108,6 @@ BUILTIN_PRESETS = {
                       "reverb=8", "vol=1.3"],
     "intercom":    ["bandpass=450:2500", "overdrive=18", "mid=1500:4",
                     "reverb=30", "vol=0.9"],
-    # Reverb before the low-pass: the room is the *other* room, so its tail
-    # gets muffled along with the voice. Reverb last would be a dark voice in
-    # a bright room, which breaks the image.
-    "next_room":   ["reverb=60", "lowpass=600", "vol=1.8"],
     "underwater":  ["lowpass=700", "chorus", "pitch=-80", "tremolo=1.5:0.2",
                     "vol=1.35"],
     "ai":          ["pitch=150", "phaser=0.4:0.5", "flanger", "reverb=30"],
