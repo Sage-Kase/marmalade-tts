@@ -67,7 +67,7 @@ def synth(model, req):
     model.generate_to_file(
         req["text"],
         req["out"],
-        voice=req.get("voice", "Hugo"),
+        voice=req.get("voice", "Kiki"),
         speed=float(req.get("speed", 1.0)),
     )
 
