@@ -5,6 +5,7 @@ Request: {"text": "...", "voice": "Hugo", "speed": 1.0, "out": "/tmp/x.wav"}
 """
 
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -25,9 +26,36 @@ _raw_model = os.environ.get("KITTEN_MODEL", "micro")  # micro = config-default.y
 MODEL_REPO = MODEL_REPOS.get(_raw_model, _raw_model)  # accept size name or full repo
 
 
+# espeak-ng has no dictionary entry for "yeah" — its letter-to-sound
+# fallback emits /jɛh/ (a literal aspirated H, audibly "yeh-h") instead
+# of /jɛə/. KittenTTS phonemizes internally with espeak, so we correct
+# the phoneme stream on its way to the model. Word-start match only; no
+# right-hand boundary so "yeah's" → /jɛhz/ is caught too. Same fix as
+# EnPhonemeFixups.kt in marmalade-tts-android.
+_YEAH_RE = re.compile(r"(?<![^ ])j([ˈˌ]?)ɛh")
+
+
+def fix_en_phonemes(phonemes: str) -> str:
+    return _YEAH_RE.sub(r"j\1ɛə", phonemes)
+
+
+def _patch_phonemizer(onnx_model):
+    backend = getattr(onnx_model, "phonemizer", None)
+    if backend is None:  # kittentts internals moved; skip rather than crash
+        return
+    orig = backend.phonemize
+
+    def phonemize(texts, **kwargs):
+        return [fix_en_phonemes(p) for p in orig(texts, **kwargs)]
+
+    backend.phonemize = phonemize
+
+
 def load_model():
     from kittentts import KittenTTS
-    return KittenTTS(MODEL_REPO)
+    model = KittenTTS(MODEL_REPO)
+    _patch_phonemizer(model.model)
+    return model
 
 
 def synth(model, req):
