@@ -1,8 +1,10 @@
 """Regression tests for the kitten daemon's espeak phoneme fixups.
 
 espeak-ng has no dictionary entry for "yeah"; letter-to-sound emits
-/jɛh/ with a literal aspirated H. The daemon corrects it to /jɛə/ at
-the phonemizer boundary (see fix_en_phonemes in kitten-daemon.py).
+/jɛh/ with a literal aspirated H. The daemon corrects it to flat /jæ/
+at the phonemizer boundary — not the lexically faithful /jɛə/, which
+Kitten renders poorly; /jæ/ was ear-picked (2026-07-27 A/B lab). See
+fix_en_phonemes in kitten-daemon.py.
 """
 
 import importlib.util
@@ -20,22 +22,22 @@ fix = kitten_daemon.fix_en_phonemes
 
 
 def test_standalone_yeah():
-    assert fix("jˈɛh") == "jˈɛə"
+    assert fix("jˈɛh") == "jˈæ"
 
 
 def test_yeah_in_sentence():
     # "I said yeah to that." per espeak 1.51/1.52 en-us
-    assert fix("aɪ sˈɛd jˈɛh tə ðˈæt") == "aɪ sˈɛd jˈɛə tə ðˈæt"
+    assert fix("aɪ sˈɛd jˈɛh tə ðˈæt") == "aɪ sˈɛd jˈæ tə ðˈæt"
 
 
 def test_possessive_keeps_trailing_consonant():
     # "yeah's" — espeak appends /z/ directly, no right-hand boundary
-    assert fix("jˈɛhz") == "jˈɛəz"
+    assert fix("jˈɛhz") == "jˈæz"
 
 
 def test_stress_variants():
-    assert fix("jˌɛh") == "jˌɛə"
-    assert fix("jɛh") == "jɛə"
+    assert fix("jˌɛh") == "jˌæ"
+    assert fix("jɛh") == "jæ"
 
 
 def test_word_internal_sequence_untouched():

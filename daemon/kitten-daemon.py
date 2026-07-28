@@ -27,16 +27,19 @@ MODEL_REPO = MODEL_REPOS.get(_raw_model, _raw_model)  # accept size name or full
 
 
 # espeak-ng has no dictionary entry for "yeah" — its letter-to-sound
-# fallback emits /jɛh/ (a literal aspirated H, audibly "yeh-h") instead
-# of /jɛə/. KittenTTS phonemizes internally with espeak, so we correct
-# the phoneme stream on its way to the model. Word-start match only; no
-# right-hand boundary so "yeah's" → /jɛhz/ is caught too. Same fix as
-# EnPhonemeFixups.kt in marmalade-tts-android.
+# fallback emits /jɛh/ (a literal aspirated H, audibly "yeh-h").
+# KittenTTS phonemizes internally with espeak, so we correct the
+# phoneme stream on its way to the model. The replacement is flat /jæ/
+# ("ya"), not the lexically faithful /jɛə/: Kitten renders the ɛ→ə
+# glide poorly on every model size, and /jæ/ won the 2026-07-27
+# listening A/B bar none. Word-start match only; no right-hand boundary
+# so "yeah's" → /jɛhz/ is caught too. Same fix as EnPhonemeFixups.kt
+# (Model.KITTEN) in marmalade-tts-android.
 _YEAH_RE = re.compile(r"(?<![^ ])j([ˈˌ]?)ɛh")
 
 
 def fix_en_phonemes(phonemes: str) -> str:
-    return _YEAH_RE.sub(r"j\1ɛə", phonemes)
+    return _YEAH_RE.sub(r"j\1æ", phonemes)
 
 
 def _patch_phonemizer(onnx_model):
