@@ -8,6 +8,7 @@ defaults:
   speed: 1.0
   play: true
   preprocessing: true    # text normalization ($100 → 100 dollars, etc.)
+  stream_chunks: true    # long inputs: start playing while later chunks render
 
 presets:
   fast:

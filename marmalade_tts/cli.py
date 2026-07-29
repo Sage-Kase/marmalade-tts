@@ -943,15 +943,34 @@ def _run():
             sys.exit("[marmalade-tts] No text to synthesize after preprocessing")
         return
 
+    # Chunk-streamed playback: a single long utterance that chunks starts
+    # playing as soon as the buffered audio can outlast the estimated
+    # remaining render time (stream_play.should_start), instead of waiting
+    # for the full render + concat. Effects force the old path — they're
+    # applied to whole files. Disable via defaults.stream_chunks: false.
+    stream_result = None
+    if (should_play and not is_batch and not effect_list
+            and config.get("defaults", {}).get("stream_chunks", True)):
+        from . import stream_play
+        stream_result = stream_play.try_stream_single(
+            utterances[0], out_paths[0],
+            engine=engine, engine_name=engine_name, eng_cfg=eng_cfg,
+            config=config, synth_kwargs=synth_kwargs,
+            preprocess_mode=preprocess_mode, custom_rules=custom_rules,
+        )
+
     # Non-streaming path: single utterance, --no-play, or --out-only run.
-    results, _ = run_batch(
-        utterances, out_paths,
-        engine=engine, engine_name=engine_name,
-        eng_cfg=eng_cfg, config=config,
-        synth_kwargs=synth_kwargs, effect_list=effect_list,
-        preprocess_mode=preprocess_mode, custom_rules=custom_rules,
-        streaming=False,
-    )
+    if stream_result is not None:
+        results = [stream_result]
+    else:
+        results, _ = run_batch(
+            utterances, out_paths,
+            engine=engine, engine_name=engine_name,
+            eng_cfg=eng_cfg, config=config,
+            synth_kwargs=synth_kwargs, effect_list=effect_list,
+            preprocess_mode=preprocess_mode, custom_rules=custom_rules,
+            streaming=False,
+        )
 
     if not results:
         sys.exit("[marmalade-tts] No text to synthesize after preprocessing")
@@ -962,10 +981,11 @@ def _run():
     # ── Output reporting ──
     report_outputs(args, engine_name, voice, results, effect_list, eng_cfg, is_batch)
 
-    # ── Playback ──
+    # ── Playback ── (chunk-streamed results already played while rendering)
     if should_play:
         for r in results:
-            play_wav(r["out"])
+            if stream_result is None:
+                play_wav(r["out"])
             if not args.out and not args.out_dir and os.path.exists(r["out"]):
                 os.unlink(r["out"])
 

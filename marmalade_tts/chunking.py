@@ -95,6 +95,31 @@ def _split_by_words(text: str, max_chars: int) -> list[str]:
     return out
 
 
+def chunk_for_streaming(text: str, max_chars: int,
+                        first_target: int = 200,
+                        first_min: int = 80) -> list[str]:
+    """Chunk ``text`` with a deliberately small first chunk.
+
+    Chunk-streamed playback wants a short first chunk (time-to-first-audio
+    is its render time) but never a *tiny* one — a lone "That's right!"
+    strands the pipeline with sub-second audio while the next chunk
+    renders. So the first chunk targets ``first_target`` chars, then
+    merges further sentences forward until it reaches ``first_min``
+    (bounded by ``max_chars``). The remainder chunks normally.
+    """
+    small = chunk_text(text, min(first_target, max_chars))
+    if len(small) <= 1:
+        return small
+    first = small[0]
+    i = 1
+    while (len(first) < first_min and i < len(small)
+           and len(first) + 1 + len(small[i]) <= max_chars):
+        first = first + " " + small[i]
+        i += 1
+    rest = " ".join(small[i:])
+    return [first] + (chunk_text(rest, max_chars) if rest else [])
+
+
 def concat_wavs(in_paths: list[str], out_path: str) -> None:
     """Concatenate WAVs end-to-end into ``out_path``.
 

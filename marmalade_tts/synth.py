@@ -47,6 +47,48 @@ class SynthResult:
         return getattr(self, key, default)
 
 
+def apply_preprocessing(
+    utt: str,
+    *,
+    engine_name: str,
+    eng_cfg: dict,
+    config: dict,
+    preprocess_mode,
+    custom_rules: list | None,
+) -> str:
+    """Resolve the preprocessing decision + rule set and apply them.
+
+    Shared by ``synthesize_one`` and the chunk-streaming path
+    (``stream_play``) so both send engines identical text.
+    """
+    from . import preprocessing as pp
+
+    if preprocess_mode is True:
+        do_preprocess = True
+    elif preprocess_mode is False:
+        do_preprocess = False
+    else:
+        do_preprocess = config.get("defaults", {}).get("preprocessing", True)
+        eng_pp = eng_cfg.get("preprocessing")
+        if eng_pp is not None:
+            if isinstance(eng_pp, bool):
+                do_preprocess = eng_pp
+            elif isinstance(eng_pp, list):
+                do_preprocess = True
+
+    if not do_preprocess:
+        return utt
+
+    rules = custom_rules
+    if rules is None:
+        cfg_rules = eng_cfg.get("preprocessing")
+        if isinstance(cfg_rules, list):
+            rules = cfg_rules
+    if rules is not None:
+        return pp.preprocess(utt, engine=engine_name, rules=rules)
+    return pp.preprocess(utt, engine=engine_name)
+
+
 def synthesize_one(
     utt: str,
     out_path: str,
@@ -81,34 +123,11 @@ def synthesize_one(
     # only needs cli's namespace at call time (for the patchable
     # ``wav_duration`` reference the streaming tests rely on).
     from . import cli
-    from . import preprocessing as pp
 
     # ── Preprocessing ──
-    if preprocess_mode is True:
-        do_preprocess = True
-    elif preprocess_mode is False:
-        do_preprocess = False
-    else:
-        do_preprocess = config.get("defaults", {}).get("preprocessing", True)
-        eng_pp = eng_cfg.get("preprocessing")
-        if eng_pp is not None:
-            if isinstance(eng_pp, bool):
-                do_preprocess = eng_pp
-            elif isinstance(eng_pp, list):
-                do_preprocess = True
-
-    if do_preprocess:
-        rules = custom_rules
-        if rules is None:
-            cfg_rules = eng_cfg.get("preprocessing")
-            if isinstance(cfg_rules, list):
-                rules = cfg_rules
-        if rules is not None:
-            processed = pp.preprocess(utt, engine=engine_name, rules=rules)
-        else:
-            processed = pp.preprocess(utt, engine=engine_name)
-    else:
-        processed = utt
+    processed = apply_preprocessing(
+        utt, engine_name=engine_name, eng_cfg=eng_cfg, config=config,
+        preprocess_mode=preprocess_mode, custom_rules=custom_rules)
 
     if not processed.strip():
         return None
@@ -126,8 +145,24 @@ def synthesize_one(
     else:
         chunks = None
 
+    # Every clean render (pre-effects) feeds the per-engine+model RTF/CPS
+    # averages that the chunk-streaming gate consumes. Best-effort: stats
+    # must never break synthesis.
+    import time as _time
+    from . import perfstats
+    _mkey = perfstats.model_key(engine, eng_cfg)
+
+    def _render(piece: str, path: str):
+        t0 = _time.monotonic()
+        engine.synthesize(piece, path, **synth_kwargs)
+        try:
+            perfstats.record(engine_name, _mkey, len(piece),
+                             _time.monotonic() - t0, cli.wav_duration(path))
+        except Exception:
+            pass
+
     if not chunks or len(chunks) == 1:
-        engine.synthesize(processed, out_path, **synth_kwargs)
+        _render(processed, out_path)
     else:
         import os as _os
         import tempfile as _tempfile
@@ -141,7 +176,7 @@ def synthesize_one(
 
             # The first chunk always renders alone: it warms/auto-starts the
             # engine's daemon, so parallel submissions can't race the spawn.
-            engine.synthesize(chunks[0], tmp_paths[0], **synth_kwargs)
+            _render(chunks[0], tmp_paths[0])
 
             rest = list(zip(chunks[1:], tmp_paths[1:]))
             workers = 1
@@ -152,13 +187,10 @@ def synthesize_one(
                 with ThreadPoolExecutor(max_workers=workers) as pool:
                     # list() drains the iterator so the first chunk error
                     # propagates; output order is fixed by tmp_paths.
-                    list(pool.map(
-                        lambda cp: engine.synthesize(cp[0], cp[1],
-                                                     **synth_kwargs),
-                        rest))
+                    list(pool.map(lambda cp: _render(cp[0], cp[1]), rest))
             else:
                 for piece, p in rest:
-                    engine.synthesize(piece, p, **synth_kwargs)
+                    _render(piece, p)
             chunking.concat_wavs(tmp_paths, out_path)
         finally:
             for p in tmp_paths:
