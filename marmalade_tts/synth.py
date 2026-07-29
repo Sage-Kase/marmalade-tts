@@ -133,12 +133,32 @@ def synthesize_one(
         import tempfile as _tempfile
         tmp_paths: list[str] = []
         try:
-            for i, piece in enumerate(chunks):
+            for i in range(len(chunks)):
                 fd, p = _tempfile.mkstemp(
                     prefix=f"marmalade-chunk-{i:03d}-", suffix=".wav")
                 _os.close(fd)
                 tmp_paths.append(p)
-                engine.synthesize(piece, p, **synth_kwargs)
+
+            # The first chunk always renders alone: it warms/auto-starts the
+            # engine's daemon, so parallel submissions can't race the spawn.
+            engine.synthesize(chunks[0], tmp_paths[0], **synth_kwargs)
+
+            rest = list(zip(chunks[1:], tmp_paths[1:]))
+            workers = 1
+            if getattr(engine, "PARALLEL_CHUNKS", False):
+                workers = min(4, _os.cpu_count() or 1, len(rest))
+            if workers > 1:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    # list() drains the iterator so the first chunk error
+                    # propagates; output order is fixed by tmp_paths.
+                    list(pool.map(
+                        lambda cp: engine.synthesize(cp[0], cp[1],
+                                                     **synth_kwargs),
+                        rest))
+            else:
+                for piece, p in rest:
+                    engine.synthesize(piece, p, **synth_kwargs)
             chunking.concat_wavs(tmp_paths, out_path)
         finally:
             for p in tmp_paths:

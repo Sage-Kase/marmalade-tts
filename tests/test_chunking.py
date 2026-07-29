@@ -209,6 +209,131 @@ class TestSynthesizeOneChunking:
         assert engine.synthesize.call_count == 1
         assert engine.synthesize.call_args[0][0] == "Short text."
 
+    def test_parallel_engine_fans_out_after_first_chunk(self, tmp_path):
+        """PARALLEL_CHUNKS engines render chunk 0 alone (daemon warm-up),
+        then overlap the rest; concat still sees chunks in input order."""
+        import threading
+        import time
+        from unittest.mock import MagicMock
+        from marmalade_tts.synth import synthesize_one
+
+        state = {"active": 0, "peak": 0, "first_done_at": None,
+                 "rest_started_at": []}
+        state_lock = threading.Lock()
+        calls: list[tuple[str, str]] = []
+
+        def synth(text, out_path, **kw):
+            with state_lock:
+                first = not calls
+                calls.append((text, out_path))
+                if not first:
+                    state["rest_started_at"].append(time.monotonic())
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+            time.sleep(0.05)
+            _silent_wav(out_path, duration_s=0.1)
+            with state_lock:
+                state["active"] -= 1
+                if first:
+                    state["first_done_at"] = time.monotonic()
+
+        engine = MagicMock()
+        engine.MAX_CHARS = 25
+        engine.PARALLEL_CHUNKS = True
+        engine.synthesize.side_effect = synth
+
+        text = ("Sentence number one here. Sentence number two here. "
+                "Sentence number three here. Sentence number four here.")
+        out = str(tmp_path / "parallel.wav")
+        result = synthesize_one(
+            text, out,
+            engine=engine, engine_name="kitten",
+            eng_cfg={}, config={"defaults": {"preprocessing": False}},
+            synth_kwargs={}, effect_list=[],
+            preprocess_mode=False, custom_rules=None,
+        )
+
+        assert result is not None
+        assert len(calls) >= 3
+        # First chunk finished before any of the rest began.
+        assert all(t >= state["first_done_at"]
+                   for t in state["rest_started_at"])
+        if (os.cpu_count() or 1) > 1:
+            assert state["peak"] >= 2  # the rest actually overlapped
+        with wave.open(out, "rb") as w:
+            assert w.getnframes() > 0
+
+    def test_sequential_engine_never_overlaps(self, tmp_path):
+        """PARALLEL_CHUNKS=False (the Engine default) keeps the old
+        one-at-a-time chunk loop."""
+        import threading
+        import time
+        from unittest.mock import MagicMock
+        from marmalade_tts.synth import synthesize_one
+
+        state = {"active": 0, "peak": 0}
+        state_lock = threading.Lock()
+
+        def synth(text, out_path, **kw):
+            with state_lock:
+                state["active"] += 1
+                state["peak"] = max(state["peak"], state["active"])
+            time.sleep(0.02)
+            _silent_wav(out_path, duration_s=0.1)
+            with state_lock:
+                state["active"] -= 1
+
+        engine = MagicMock()
+        engine.MAX_CHARS = 25
+        engine.PARALLEL_CHUNKS = False
+        engine.synthesize.side_effect = synth
+
+        text = ("Sentence number one here. Sentence number two here. "
+                "Sentence number three here. Sentence number four here.")
+        out = str(tmp_path / "sequential.wav")
+        synthesize_one(
+            text, out,
+            engine=engine, engine_name="kokoro",
+            eng_cfg={}, config={"defaults": {"preprocessing": False}},
+            synth_kwargs={}, effect_list=[],
+            preprocess_mode=False, custom_rules=None,
+        )
+
+        assert state["peak"] == 1
+
+    def test_parallel_chunk_error_propagates_and_cleans_tmp(self, tmp_path):
+        """A failing chunk inside the pool surfaces to the caller and no
+        marmalade-chunk temp WAVs are left behind."""
+        import glob
+        import tempfile
+        from unittest.mock import MagicMock
+        from marmalade_tts.synth import synthesize_one
+
+        def synth(text, out_path, **kw):
+            if "three" in text:
+                raise RuntimeError("chunk exploded")
+            _silent_wav(out_path, duration_s=0.1)
+
+        engine = MagicMock()
+        engine.MAX_CHARS = 25
+        engine.PARALLEL_CHUNKS = True
+        engine.synthesize.side_effect = synth
+
+        pattern = os.path.join(tempfile.gettempdir(), "marmalade-chunk-*")
+        preexisting = set(glob.glob(pattern))
+
+        text = ("Sentence number one here. Sentence number two here. "
+                "Sentence number three here. Sentence number four here.")
+        with pytest.raises(RuntimeError, match="chunk exploded"):
+            synthesize_one(
+                text, str(tmp_path / "boom.wav"),
+                engine=engine, engine_name="kitten",
+                eng_cfg={}, config={"defaults": {"preprocessing": False}},
+                synth_kwargs={}, effect_list=[],
+                preprocess_mode=False, custom_rules=None,
+            )
+        assert set(glob.glob(pattern)) == preexisting
+
     def test_config_max_chars_overrides_engine_default(self, tmp_path):
         """engines.<name>.max_chars in config wins over the class attribute."""
         from unittest.mock import MagicMock

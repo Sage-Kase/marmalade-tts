@@ -76,12 +76,17 @@ def _send_response(conn, obj):
     conn.sendall((json.dumps(obj) + "\n").encode())
 
 
-def serve(engine: str, model_loader, synth_handler):
+def serve(engine: str, model_loader, synth_handler, max_concurrency: int = 1):
     """Run the daemon main loop for `engine`.
 
     `model_loader`: zero-arg callable returning the loaded model object.
     `synth_handler`: callable taking (model, request_dict). Must write the
                      output file at `request["out"]`. Raise on failure.
+    `max_concurrency`: how many requests may run `synth_handler` at once.
+                       Default 1 (serialized) — only raise it for engines
+                       whose handler is thread-safe end to end (stateless
+                       model, any non-reentrant stage like espeak
+                       phonemization locked inside the handler).
     """
     socket_path, pid_path, log_path = paths(engine)
     log = _setup_logging(engine, log_path)
@@ -98,14 +103,14 @@ def serve(engine: str, model_loader, synth_handler):
     log.info("Model loaded OK")
     print(f"{prefix} model loaded", flush=True)
 
-    lock = threading.Lock()
+    gate = threading.BoundedSemaphore(max(1, max_concurrency))
 
     def handle_client(conn):
         try:
             req = _read_request(conn)
             if req is None:
                 return
-            with lock:
+            with gate:
                 synth_handler(model, req)
             out = req.get("out")
             _send_response(conn, {"ok": True, "out": out})

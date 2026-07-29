@@ -7,6 +7,7 @@ Request: {"text": "...", "voice": "Hugo", "speed": 1.0, "out": "/tmp/x.wav"}
 import os
 import re
 import sys
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import serve, check_loaded
@@ -42,6 +43,12 @@ def fix_en_phonemes(phonemes: str) -> str:
     return _YEAH_RE.sub(r"j\1æ", phonemes)
 
 
+# espeak keeps global state — concurrent phonemize calls are unsafe, so the
+# patched wrapper serializes G2P while leaving ONNX inference free to run in
+# parallel across requests (same split as upstream KittenTTS PR #147).
+_phonemize_lock = threading.Lock()
+
+
 def _patch_phonemizer(onnx_model):
     backend = getattr(onnx_model, "phonemizer", None)
     if backend is None:  # kittentts internals moved; skip rather than crash
@@ -49,15 +56,31 @@ def _patch_phonemizer(onnx_model):
     orig = backend.phonemize
 
     def phonemize(texts, **kwargs):
-        return [fix_en_phonemes(p) for p in orig(texts, **kwargs)]
+        with _phonemize_lock:
+            out = orig(texts, **kwargs)
+        return [fix_en_phonemes(p) for p in out]
 
     backend.phonemize = phonemize
+
+
+def _materialize_voices(onnx_model):
+    """Replace the lazy NpzFile voice store with a plain dict of arrays.
+
+    numpy's NpzFile reads entries from one shared zip handle, which is not
+    thread-safe — concurrent requests raced it into "Overlapped entries ...
+    (possible zip bomb)" errors. Plain ndarrays are read-only-safe."""
+    voices = getattr(onnx_model, "voices", None)
+    files = getattr(voices, "files", None)
+    if files is None:  # already a dict, or kittentts internals moved
+        return
+    onnx_model.voices = {name: voices[name] for name in files}
 
 
 def load_model():
     from kittentts import KittenTTS
     model = KittenTTS(MODEL_REPO)
     _patch_phonemizer(model.model)
+    _materialize_voices(model.model)
     return model
 
 
@@ -73,4 +96,9 @@ def synth(model, req):
 
 
 if __name__ == "__main__":
-    serve("kitten", load_model, synth)
+    # Kitten's handler is thread-safe (phonemize locked above; ORT session.run
+    # is reentrant; each request writes its own out file), so let chunked
+    # requests overlap. Capped at 4: each inference already uses ORT intra-op
+    # threads, so more concurrent runs just oversubscribe the CPU.
+    serve("kitten", load_model, synth,
+          max_concurrency=min(4, os.cpu_count() or 1))

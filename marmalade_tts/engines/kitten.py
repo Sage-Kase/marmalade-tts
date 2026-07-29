@@ -27,6 +27,9 @@ class KittenEngine(Engine):
         self.voice = cfg.get("voice", "Kiki")
         self.model_size = cfg.get("model_size", "micro")
         self.use_daemon = cfg.get("daemon", True)
+        # The kitten daemon runs concurrent requests (serve max_concurrency=4
+        # with a phonemizer lock); the subprocess fallback must stay serial.
+        self.PARALLEL_CHUNKS = self.use_daemon
 
     def _repo(self) -> str:
         return MODEL_REPOS.get(self.model_size, self.model_size)

@@ -462,6 +462,22 @@ Look at `daemon/kitten-daemon.py` for the reference implementation. The daemon:
 - Accepts newline-delimited JSON: `{"text": "...", "out": "...", "voice": "...", "speed": 1.0}`
 - Responds with: `{"ok": true, "out": "..."}` or `{"ok": false, "error": "..."}`
 
+**Concurrent chunk requests (opt-in).** `serve()` serializes synthesis by
+default (`max_concurrency=1`). An engine may raise it so the transparent
+chunking in `synth.py` can render chunks in parallel — set
+`PARALLEL_CHUNKS = True` on the engine (daemon path only; the subprocess
+fallback would cold-load one model per chunk) and pass
+`serve(..., max_concurrency=N)`. Before doing this, audit the handler for
+thread safety end to end. Kitten needed two fixes that will likely apply to
+any kittentts-style engine: espeak phonemization holds global state (locked
+in `_patch_phonemizer`), and numpy `NpzFile` voice stores read from one
+shared zip handle (materialized to a plain dict in `_materialize_voices`).
+ORT `session.run` itself is reentrant. Cap N around 4 — each inference
+already uses ORT intra-op threads. Measured on kitten micro: 6-chunk input
+~1.7× faster (RTF 0.50 → 0.28). Note this helps long-input throughput only;
+time-to-first-audio is unchanged (the first chunk renders alone to warm the
+daemon and avoid racing auto-start).
+
 > **Note for pocket:** Pocket TTS loads in ~200ms, so **no daemon is needed**.
 > This step was intentionally skipped for pocket.
 

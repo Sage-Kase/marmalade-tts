@@ -29,6 +29,13 @@ class Engine:
     # arbitrary lengths gracefully, don't chunk. Override per engine.
     MAX_CHARS: "int | None" = None
 
+    # Whether chunked synthesis may call ``synthesize`` from several threads
+    # at once (the chunk loop in synth.py fans out after the first chunk).
+    # Only safe for daemon-backed engines whose daemon accepts concurrent
+    # requests (serve(max_concurrency=N)); a subprocess fallback would
+    # cold-load one model per chunk. Engines set this per instance.
+    PARALLEL_CHUNKS: bool = False
+
     def synthesize(self, text: str, out_path: str, **kwargs):
         """Synthesize text to a WAV file. Subclasses must implement."""
         raise NotImplementedError
