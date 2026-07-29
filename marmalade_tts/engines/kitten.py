@@ -30,12 +30,15 @@ class KittenEngine(Engine):
         # The kitten daemon runs concurrent requests (serve max_concurrency=4
         # with a phonemizer lock); the subprocess fallback must stay serial.
         self.PARALLEL_CHUNKS = self.use_daemon
+        # The daemon renders a text prefix for cross-chunk prosody
+        # conditioning and cuts it out sample-exactly (duration output).
+        self.STREAM_CONTEXT = self.use_daemon
 
     def _repo(self) -> str:
         return MODEL_REPOS.get(self.model_size, self.model_size)
 
     def synthesize(self, text: str, out_path: str, voice: str = None,
-                   speed: float = 1.0, **kwargs):
+                   speed: float = 1.0, context: str = None, **kwargs):
         v = voice or self.voice
 
         if self.use_daemon:
@@ -43,6 +46,8 @@ class KittenEngine(Engine):
             # loads one model at startup and refuses mismatches).
             request = {"text": text, "voice": v, "speed": speed,
                        "model": self._repo(), "out": out_path}
+            if context:
+                request["context"] = context
             dmgr.synthesize("kitten", request, auto_start=True)
             return
 

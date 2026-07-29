@@ -42,6 +42,11 @@ from . import chunking, perfstats
 
 SAFETY = 1.5
 
+# Cross-chunk prosody conditioning: engines advertising STREAM_CONTEXT get
+# the last words of the previous chunk as rendered-then-discarded context,
+# so chunk N+1 opens as a continuation instead of a fresh utterance.
+CONTEXT_WORDS = 4
+
 
 def should_start(buffered_audio_s: float, remaining_chunk_chars: list[int],
                  est: "tuple[float, float] | None",
@@ -124,10 +129,19 @@ def try_stream_single(
     errors: list[BaseException] = []
     cond = threading.Condition()
 
+    use_context = bool(getattr(engine, "STREAM_CONTEXT", False))
+
     def _render_one(i: int):
         t0 = time.monotonic()
-        engine.synthesize(chunks[i], tmp_paths[i], **synth_kwargs)
+        kwargs = dict(synth_kwargs)
+        if use_context and i > 0:
+            kwargs["context"] = " ".join(
+                chunks[i - 1].split()[-CONTEXT_WORDS:])
+        engine.synthesize(chunks[i], tmp_paths[i], **kwargs)
         dt = time.monotonic() - t0
+        # Recorded audio duration is post-trim while render time includes
+        # the discarded context prefix — the EMA absorbs the overhead, so
+        # the gate stays honest about the true cost per emitted second.
         dur = cli.wav_duration(tmp_paths[i])
         perfstats.record(engine_name, mkey, len(chunks[i]), dt, dur)
         with cond:
