@@ -464,7 +464,7 @@ class TestDaemonEnv:
     def test_kitten_default_is_micro(self):
         # config-default.yaml default; the old hardcoded env said nano.
         with self._with_cfg({}):
-            assert daemon_mod._daemon_env("kitten") == {"KITTEN_MODEL": "micro"}
+            assert daemon_mod._daemon_env("kitten") == {"KITTEN_MODEL": "nano"}
 
     def test_kokoro_lang_from_config(self):
         with self._with_cfg({"engines": {"kokoro": {"lang": "b"}}}):
@@ -481,7 +481,7 @@ class TestDaemonEnv:
 
     def test_config_load_failure_falls_back_to_defaults(self):
         with patch("marmalade_tts.config.load", side_effect=OSError("boom")):
-            assert daemon_mod._daemon_env("kitten") == {"KITTEN_MODEL": "micro"}
+            assert daemon_mod._daemon_env("kitten") == {"KITTEN_MODEL": "nano"}
 
     def test_unknown_engine_empty(self):
         with self._with_cfg({}):

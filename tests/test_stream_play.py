@@ -69,19 +69,52 @@ class TestChunkForStreaming:
     def test_short_text_single_chunk(self):
         assert chunk_for_streaming("Hello there.", 500) == ["Hello there."]
 
-    def test_first_chunk_is_small(self):
-        text = ("A first sentence of reasonable length sits here. " * 1
+    def test_ramp_small_first_then_growing(self):
+        text = ("A first sentence of reasonable length sits here. "
                 + "Following sentences fill out the rest of the text. " * 20)
         chunks = chunk_for_streaming(text.strip(), 500)
-        assert len(chunks) >= 2
-        assert len(chunks[0]) <= 200
+        assert len(chunks) >= 3
+        assert len(chunks[0]) <= 100   # ramp start (60 target, clause-whole)
         assert all(len(c) <= 500 for c in chunks)
+        # Later chunks grow — the last full-size chunk beats the first.
+        assert max(len(c) for c in chunks[1:]) > len(chunks[0])
 
-    def test_tiny_first_sentence_merged_forward(self):
-        text = ("Yes! " + "This much longer second sentence would strand a "
-                "tiny first chunk while the pipeline renders it alone. " * 8)
-        chunks = chunk_for_streaming(text.strip(), 500)
-        assert len(chunks[0]) >= 80  # "Yes!" was merged forward
+    def test_never_cuts_mid_clause(self):
+        text = ("The library closes at nine tonight. If we leave now, we "
+                "can still catch the last hour. Bring your notes, because "
+                "the study room upstairs is usually quiet. " * 5)
+        for c in chunk_for_streaming(text.strip(), 500):
+            assert c[-1] in ".!?;:," or c[-1] in "\"'”"
+
+    def test_dialogue_comma_before_quote_is_a_boundary(self):
+        text = ('Then the lighthouse keeper said, "The ship is coming too '
+                'close to the shoreline!" Everyone ran for the rocks below '
+                'while the horn kept sounding across the dark water.')
+        chunks = chunk_for_streaming(text, 500)
+        assert chunks[0] == "Then the lighthouse keeper said,"
+        assert chunks[1].startswith('"The ship')
+
+    def test_semicolons_and_colons_are_boundaries(self):
+        text = ("The plan was simple: leave before dawn; travel light; "
+                "and tell absolutely nobody where we were headed that day.")
+        chunks = chunk_for_streaming(text, 500)
+        # Clause units pack up to the 60-char ramp target, never past a
+        # clause boundary.
+        assert chunks[0] == ("The plan was simple: leave before dawn; "
+                             "travel light;")
+
+    def test_plain_commas_are_not_boundaries(self):
+        text = ("This sentence, with a short interjection, keeps its commas "
+                "inside one chunk. And a second sentence follows it here. "
+                "And then a third sentence closes out the whole passage.")
+        chunks = chunk_for_streaming(text, 500)
+        assert chunks[0] == ("This sentence, with a short interjection, "
+                             "keeps its commas inside one chunk.")
+
+    def test_overlong_clause_falls_back_to_word_split(self):
+        text = ("word " * 200).strip() + ". Then a normal sentence follows."
+        chunks = chunk_for_streaming(text, 300)
+        assert all(len(c) <= 300 for c in chunks)
 
     def test_nothing_lost(self):
         text = ("One sentence here. " * 30).strip()
@@ -94,37 +127,41 @@ class TestChunkForStreaming:
 
 class TestShouldStart:
     def test_all_rendered_starts(self):
-        assert should_start(0.0, [], None, 1)
+        assert should_start(0.0, [], None)
 
     def test_no_estimate_waits(self):
-        assert not should_start(5.0, [100], None, 1)
+        assert not should_start(5.0, [100], None)
 
     def test_fast_engine_starts_after_first_chunk(self):
-        # rtf 0.2, 10 chars/audio-s, five 100-char chunks left: 10s render
-        # (1 worker) vs 45s of drain — playback buys the render time, so a
-        # sub-realtime engine starts even single-threaded.
-        assert should_start(5.0, [100] * 5, (0.2, 10.0), 1)
+        # rtf 0.2, 10 chars/audio-s: chunk k renders in 2s, plays for 10s —
+        # every deadline is met with a 5s buffer.
+        assert should_start(5.0, [100] * 5, (0.2, 10.0))
 
     def test_slow_engine_waits(self):
-        # rtf 1.5, 1 worker: 75s render vs 45s drain.
-        assert not should_start(5.0, [100] * 5, (1.5, 10.0), 1)
+        # rtf 1.5: chunk 1 renders in 15s but is needed at 5s.
+        assert not should_start(5.0, [100] * 5, (1.5, 10.0))
 
     def test_slow_engine_eventually_starts(self):
         # Same slow engine, one small chunk left: 3s render vs 5s buffer.
-        assert should_start(5.0, [20], (1.5, 10.0), 1)
+        assert should_start(5.0, [20], (1.5, 10.0))
 
-    def test_workers_divide_render_time(self):
-        est = (2.0, 10.0)  # rtf 2: three 100-char chunks → 60s render
-        assert not should_start(10.0, [100] * 3, est, 1)  # 90 > 30 drain
-        assert should_start(10.0, [100] * 3, est, 8)      # 11.25 ≤ 30
+    def test_big_next_chunk_binds_not_the_total(self):
+        # rtf 0.5: a huge chunk right after a small buffer misses its
+        # deadline (25s render, needed at 4s) even though the total render
+        # easily fits inside the total audio. The per-chunk check catches
+        # what an aggregate check would miss.
+        est = (0.5, 10.0)
+        assert not should_start(8.0, [500, 100], est)
+        # Same engine and buffer with uniform small chunks passes: every
+        # deadline stays cheap.
+        assert should_start(8.0, [100] * 5, est)
 
-    def test_last_chunk_deadline_is_the_binding_one(self):
-        # rtf 0.9, 1 worker, plenty of chunks: render 90s vs drain 90s —
-        # fails only because of the safety factor; with a bigger buffer the
-        # same engine passes. The drain term is doing the work here.
+    def test_safety_factor_bites_near_rtf_one(self):
+        # rtf 0.9: raw deadlines are met (9s render vs 10s slot) but the
+        # 1.5x safety margin correctly refuses; more buffer fixes it.
         est = (0.9, 10.0)
-        assert not should_start(10.0, [100] * 10, est, 1)
-        assert should_start(50.0, [100] * 10, est, 1)
+        assert not should_start(10.0, [100] * 10, est)
+        assert should_start(50.0, [100] * 10, est)
 
 
 # ── try_stream_single pipeline ───────────────────────────────────────────────

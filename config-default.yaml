@@ -42,7 +42,7 @@ presets:
 engines:
   kitten:
     device: cpu
-    model_size: micro
+    model_size: nano
     voice: Kiki
     daemon: true           # keep model in RAM for instant synthesis
     # preprocessing: true  # or a list of rules: [currency, number, filename]

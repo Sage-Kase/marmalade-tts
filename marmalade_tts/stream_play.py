@@ -7,18 +7,23 @@ playback starts as soon as the buffered audio can outlast the estimated
 remaining render time — one inequality, fed by the observed per-engine
 RTF/CPS averages in ``perfstats``:
 
-    start when  SAFETY * est_remaining_render <= buffered + drain
+    every remaining chunk must render before the play head reaches it:
+    for each unrendered chunk k (in order),
+        SAFETY * est_ready_time(k) <= buffered + audio_before(k)
 
-``drain`` is the audio time that will play before the *last* chunk is
-needed (everything remaining except that last chunk) — playback itself
-buys render time, and the last chunk's deadline is the binding one. That
-single rule scales across devices and engines with no tuning tiers: a
-fast engine starts right after the first chunk; an engine near RTF 1
-buffers a few chunks; one above RTF 1 buffers most of the input — exactly
-the behavior needed to stay gapless. Cold start (no stats yet) simply
-waits for the first chunk's render, which itself becomes the first
-measurement. If the estimate is ever wrong, playback degrades to a gap
-(the consumer waits for the next chunk), never to corruption.
+Playback itself buys render time, so a sub-realtime engine starts after
+the first chunk; an engine near RTF 1 buffers a few chunks; one above
+RTF 1 buffers most of the input. The per-chunk check matters: with big
+chunks the *next* chunk's deadline binds, not the last one's — a large
+chunk 2 can miss its slot even when the total render fits. Render-time
+estimates are deliberately sequential-pessimistic (no division by
+workers): parallel engines open the gate slightly late rather than gap.
+Combined with the ramped chunk sizes from ``chunk_for_streaming`` (small
+early, larger late), early deadlines stay cheap and TTFA stays low.
+Cold start (no stats yet) simply waits for the first chunk's render,
+which itself becomes the first measurement. If the estimate is ever
+wrong, playback degrades to a gap (the consumer waits for the next
+chunk), never to corruption.
 
 Used only when: playing (not --no-play), single utterance, no effects
 (effects are applied to whole files and would differ chunk-by-chunk),
@@ -39,10 +44,12 @@ SAFETY = 1.5
 
 
 def should_start(buffered_audio_s: float, remaining_chunk_chars: list[int],
-                 est: "tuple[float, float] | None", workers: int,
+                 est: "tuple[float, float] | None",
                  safety: float = SAFETY) -> bool:
     """The playback gate. ``remaining_chunk_chars`` lists the sizes of the
-    not-yet-rendered chunks; ``est`` is (rtf, chars_per_audio_s) or None."""
+    not-yet-rendered chunks in play order; ``est`` is
+    (rtf, chars_per_audio_s) or None. Every remaining chunk must be
+    renderable before the play head reaches it."""
     if not remaining_chunk_chars:
         return True
     if est is None:
@@ -50,12 +57,15 @@ def should_start(buffered_audio_s: float, remaining_chunk_chars: list[int],
     rtf, cps = est
     if cps <= 0:
         return False
-    audio = [c / cps for c in remaining_chunk_chars]
-    est_render_wall = rtf * sum(audio) / max(1, workers)
-    # Audio time available before the last unrendered chunk is needed:
-    # the buffer plus every remaining chunk that plays before it.
-    drain = buffered_audio_s + sum(audio) - audio[-1]
-    return safety * est_render_wall <= drain
+    t_ready = 0.0                    # est render-completion time of chunk k
+    t_needed = buffered_audio_s      # play head reaches chunk k at this time
+    for chars in remaining_chunk_chars:
+        audio = chars / cps
+        t_ready += rtf * audio
+        if safety * t_ready > t_needed:
+            return False
+        t_needed += audio
+    return True
 
 
 def _effective_workers(engine, n_rest: int) -> int:
@@ -166,7 +176,7 @@ def try_stream_single(
             i += 1
         remaining = [len(chunks[j]) for j in range(n) if j not in ready]
         return should_start(buffered, remaining,
-                            perfstats.estimate(engine_name, mkey), workers)
+                            perfstats.estimate(engine_name, mkey))
 
     threading.Thread(target=_coordinate, daemon=True,
                      name="marmalade-stream-coord").start()

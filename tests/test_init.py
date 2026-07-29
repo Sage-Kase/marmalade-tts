@@ -30,7 +30,7 @@ class TestNonInteractive:
     def test_single_engine(self):
         result = init_non_interactive(["kitten"])
         assert "kitten" in result
-        assert result["kitten"]["model_size"] == "micro"  # default
+        assert result["kitten"]["model_size"] == "nano"  # default
         assert result["kitten"]["daemon"] is False
 
     def test_multiple_engines(self):
@@ -201,7 +201,7 @@ class TestEngineMetadata:
         opts = ENGINE_INFO["kitten"]["options"]
         assert "model_size" in opts
         assert "micro" in opts["model_size"]["choices"]
-        assert opts["model_size"]["default"] == "micro"
+        assert opts["model_size"]["default"] == "nano"
 
     def test_kokoro_has_voice_option(self):
         opts = ENGINE_INFO["kokoro"]["options"]

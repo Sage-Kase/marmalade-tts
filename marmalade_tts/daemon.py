@@ -176,7 +176,7 @@ def _daemon_env(engine: str) -> dict:
         eng = {}
 
     if engine == "kitten":
-        return {"KITTEN_MODEL": str(eng.get("model_size", "micro"))}
+        return {"KITTEN_MODEL": str(eng.get("model_size", "nano"))}
     if engine == "kokoro":
         return {"KOKORO_LANG": str(eng.get("lang") or "a")}
     if engine == "piper":

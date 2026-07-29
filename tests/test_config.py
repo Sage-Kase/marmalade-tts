@@ -22,7 +22,7 @@ def sample_config():
             "play": True,
         },
         "engines": {
-            "kitten": {"voice": "Kiki", "daemon": True, "model_size": "micro"},
+            "kitten": {"voice": "Kiki", "daemon": True, "model_size": "nano"},
             "kokoro": {"voice": "af_heart", "lang": "a"},
         },
         "presets": {
@@ -285,7 +285,7 @@ class TestLoadMergesDefaults:
         with patch.object(cfg_mod, "CONFIG_PATH", cfg_path):
             loaded = cfg_mod.load()
         assert loaded["engines"]["kitten"]["voice"] == "Custom"
-        assert loaded["engines"]["kitten"]["model_size"] == "micro"
+        assert loaded["engines"]["kitten"]["model_size"] == "nano"
         # Other default engines are still present.
         assert "kokoro" in loaded["engines"]
 

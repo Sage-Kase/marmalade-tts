@@ -23,7 +23,7 @@ ENGINE_INFO = {
             "model_size": {
                 "prompt": "Model size",
                 "choices": ["nano", "micro", "mini"],
-                "default": "micro",
+                "default": "nano",
                 "help": "nano (~23MB, fastest)  micro (~41MB, balanced)  mini (~80MB, best quality)",
             },
         },
@@ -301,7 +301,7 @@ def init_non_interactive(engines, engine_options=None):
 
         # Engine-specific defaults
         if eng == "kitten":
-            cfg.setdefault("model_size", "micro")
+            cfg.setdefault("model_size", "nano")
         elif eng == "kokoro":
             cfg.setdefault("voice", "heart")
             # Note: no 'lang' default. Voice's natural language is used unless
@@ -382,7 +382,7 @@ def init_interactive():
 
         # Engine-specific defaults
         if eng == "kitten":
-            cfg.setdefault("model_size", "micro")
+            cfg.setdefault("model_size", "nano")
         elif eng == "kokoro":
             cfg.setdefault("voice", "heart")
             # Note: no 'lang' default. Voice's natural language is used unless

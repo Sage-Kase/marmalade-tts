@@ -24,7 +24,7 @@ DEFAULT_CONFIG = {
     "engines": {
         "kitten": {
             "device": "cpu",
-            "model_size": "micro",
+            "model_size": "nano",
             "voice": "Kiki",
             "daemon": True,
         },

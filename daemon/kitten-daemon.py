@@ -23,7 +23,7 @@ MODEL_REPOS = {
     "mini":  "KittenML/kitten-tts-mini-0.8",
 }
 
-_raw_model = os.environ.get("KITTEN_MODEL", "micro")  # micro = config-default.yaml default
+_raw_model = os.environ.get("KITTEN_MODEL", "nano")  # nano = config-default.yaml default
 MODEL_REPO = MODEL_REPOS.get(_raw_model, _raw_model)  # accept size name or full repo
 
 

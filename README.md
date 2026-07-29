@@ -697,7 +697,7 @@ engines:
 
   kitten:
     device: cpu
-    model_size: micro   # nano / micro / mini
+    model_size: nano    # nano / micro / mini
     voice: Kiki
     daemon: true
 

@@ -95,29 +95,71 @@ def _split_by_words(text: str, max_chars: int) -> list[str]:
     return out
 
 
-def chunk_for_streaming(text: str, max_chars: int,
-                        first_target: int = 200,
-                        first_min: int = 80) -> list[str]:
-    """Chunk ``text`` with a deliberately small first chunk.
+# Clause boundary for streaming chunks. Mid-sentence cuts sound like the
+# TTS was cut off and restarted (2026-07-28 listening lab), so streaming
+# only ever breaks at: sentence ends (incl. inside closing quotes),
+# semicolons, colons, newlines — and the dialogue-intro comma directly
+# before an opening quote ('the keeper said, "The ship..."'), where a
+# pause reads as natural. Plain commas and dashes are NOT boundaries.
+_CLAUSE_BOUNDARY = re.compile(
+    r'(?<=[.!?;:])[)"”\']?\s+'   # clause-final punct (+ closing quote)
+    r'|,\s+(?=["“])'             # comma introducing a quotation
+    r'|\s*\n+\s*'                     # explicit line breaks
+)
 
-    Chunk-streamed playback wants a short first chunk (time-to-first-audio
-    is its render time) but never a *tiny* one — a lone "That's right!"
-    strands the pipeline with sub-second audio while the next chunk
-    renders. So the first chunk targets ``first_target`` chars, then
-    merges further sentences forward until it reaches ``first_min``
-    (bounded by ``max_chars``). The remainder chunks normally.
+# Streaming chunk-size ramp: early chunks stay small so the playback gate
+# can open after little buffered audio without a later chunk missing its
+# deadline; later chunks grow to amortize per-chunk overhead. Values are
+# character targets — actual chunks end on clause boundaries.
+_STREAM_RAMP = (60, 100, 160, 250, 400)
+
+
+def _clause_units(text: str) -> list[str]:
+    """Split at clause boundaries, keeping all punctuation (closing quotes,
+    the dialogue comma) attached to the preceding unit — the separator match
+    ends exactly where the next clause begins."""
+    units: list[str] = []
+    pos = 0
+    for m in _CLAUSE_BOUNDARY.finditer(text):
+        u = text[pos:m.end()].strip()
+        if u:
+            units.append(u)
+        pos = m.end()
+    tail = text[pos:].strip()
+    if tail:
+        units.append(tail)
+    return units
+
+
+def chunk_for_streaming(text: str, max_chars: int) -> list[str]:
+    """Chunk ``text`` for streamed playback: clause-boundary cuts only,
+    with ramped sizes (small first for time-to-first-audio, growing after).
+
+    A clause unit longer than ``max_chars`` falls back to ``chunk_text``
+    word-splitting for that unit — unavoidable, and rare in real prose.
     """
-    small = chunk_text(text, min(first_target, max_chars))
-    if len(small) <= 1:
-        return small
-    first = small[0]
-    i = 1
-    while (len(first) < first_min and i < len(small)
-           and len(first) + 1 + len(small[i]) <= max_chars):
-        first = first + " " + small[i]
-        i += 1
-    rest = " ".join(small[i:])
-    return [first] + (chunk_text(rest, max_chars) if rest else [])
+    units: list[str] = []
+    for u in _clause_units(text):
+        if len(u) > max_chars:
+            units.extend(chunk_text(u, max_chars))
+        else:
+            units.append(u)
+    if len(units) <= 1:
+        return units
+
+    out: list[str] = []
+    cur = ""
+    for u in units:
+        target = _STREAM_RAMP[min(len(out), len(_STREAM_RAMP) - 1)]
+        target = min(target, max_chars)
+        if cur and len(cur) + 1 + len(u) > target:
+            out.append(cur)
+            cur = u
+        else:
+            cur = (cur + " " + u) if cur else u
+    if cur:
+        out.append(cur)
+    return out
 
 
 def concat_wavs(in_paths: list[str], out_path: str) -> None:
