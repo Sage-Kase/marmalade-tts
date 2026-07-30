@@ -323,7 +323,13 @@ def _synth_phonemes(om, req):
     voice = req.get("voice", "Kiki")
     voice = om.voice_aliases.get(voice, voice)
     speed = float(req.get("speed", 1.0)) * om.speed_priors.get(voice, 1.0)
-    ref_id = min(len(req["ph_text"]), om.voices[voice].shape[0] - 1)
+    # The wrapper indexes the style pack by input length; "style_ref"
+    # overrides it (per-utterance pinning experiments — small row shifts
+    # turned out to be audible on the 2026-07-29 lab).
+    ref_id = int(req.get("style_ref",
+                         min(len(req["ph_text"]),
+                             om.voices[voice].shape[0] - 1)))
+    ref_id = max(0, min(ref_id, om.voices[voice].shape[0] - 1))
 
     out = om.session.run(None, {
         "input_ids": np.array([ids], dtype=np.int64),
