@@ -93,12 +93,14 @@ def _materialize_voices(onnx_model):
 #     other end, so a chunk can be conditioned on the NEXT chunk's opening
 #     words — its last word then carries natural coarticulation into a real
 #     rendered pause instead of end-of-utterance decay. Cut positions are
-#     found by counting words: espeak's IPA output separates words with the
-#     same spaces as the input text, so the boundary is exactly the Nth
-#     space token (counting the phonemized snippet's own words keeps number
-#     expansion like "42" → "forty two" consistent). The earlier
-#     phoneme-count-and-snap approach could land one gap off and clip a
-#     short word ("the horn" → "horn").
+#     found by counting the snippet's PHONEMES and snapping to the nearest
+#     word onset: pure word counting broke on espeak's function-word fusion
+#     ("from the" → "fɹʌmðə", one IPA word in context but two standalone —
+#     heard as skipped words at a P6 seam), and pure phoneme counting
+#     without onset snapping could land one gap off and clip a short word
+#     ("the horn" → "horn"). Head cuts back off one frame into the gap and
+#     tail cuts drop the trailing space run, because a word's acoustic
+#     onset bleeds into the space frames before it.
 #     NOTE: kittentts splits its input on [.!?] into independent renders, so
 #     conditioning cannot cross a sentence boundary — a lookahead after a
 #     sentence end comes back as its own run, contributes nothing, and is
@@ -126,10 +128,14 @@ SPACE_ID = VOCAB[" "]
 _PUNCT_SET = set(_punctuation)
 
 
-def _speech_word_count(ph: str) -> int:
-    """Space-separated groups of a phonemized string that contain speech
-    (espeak sometimes spaces punctuation out as its own 'word')."""
-    return sum(1 for w in ph.split() if any(c not in _PUNCT_SET for c in w))
+def _speech_phoneme_count(ph: str) -> int:
+    """Tokens a phonemized string contributes to the model, excluding
+    spaces/punctuation. Words can't be counted instead: espeak fuses
+    function-word pairs with their neighbours ("from the" → "fɹʌmðə"),
+    so a snippet's standalone word count disagrees with the full render's
+    — but its phoneme count barely moves."""
+    return sum(1 for c in ph
+               if c in VOCAB and VOCAB[c] > SPACE_ID)
 
 
 
@@ -169,41 +175,62 @@ def _cum_samples(dur) -> list:
 
 
 def _speech_onsets(ids) -> list:
-    """Token indices where speech groups begin. A group is a run of speech
-    tokens; punctuation neither opens nor splits one, so trailing puncts
-    and their pauses ride with the word they follow."""
-    onsets, in_group = [], False
+    """(token_index, speech_tokens_before) for each speech-group onset. A
+    group is a run of speech tokens; punctuation neither opens nor splits
+    one, so trailing puncts and their pauses ride with the word they
+    follow."""
+    onsets, in_group, seen = [], False, 0
     for i, t in enumerate(ids):
         if t > SPACE_ID:
             if not in_group:
-                onsets.append(i)
+                onsets.append((i, seen))
             in_group = True
+            seen += 1
         elif t == 0 or t == SPACE_ID:
             in_group = False
     return onsets
 
 
-def _context_cut(ids, dur, n_context_words: int) -> int:
-    """Sample offset where the context prefix ends: the onset of the first
-    speech group past the context's words. Everything non-speech at the
-    boundary (punctuation pause + word gap) stays on the discarded side,
-    so the chunk opens exactly at its first word."""
+def _speech_total(ids) -> int:
+    return sum(1 for t in ids if t > SPACE_ID)
+
+
+def _context_cut(ids, dur, n_context_phonemes: int) -> int:
+    """Sample offset where the context prefix ends: the word onset nearest
+    the context's phoneme count (snapping absorbs espeak's context-
+    dependent realizations), backed off one frame into the preceding gap
+    so the first kept word keeps its attack — word onsets bleed a little
+    into the space frames before them. Ties snap earlier: a duplicated
+    sliver of context beats a clipped word."""
     onsets = _speech_onsets(ids)
-    if len(onsets) <= n_context_words:
+    if not onsets:
         return 0
-    return _cum_samples(dur)[onsets[n_context_words]]
+    idx, _ = min(onsets, key=lambda o: (abs(o[1] - n_context_phonemes), o[0]))
+    cut = _cum_samples(dur)[idx]
+    if idx > 0 and 0 < ids[idx - 1] <= SPACE_ID:
+        cut = max(0, cut - FRAME)
+    return cut
 
 
-def _lookahead_cut(ids, dur, n_lookahead_words: int):
-    """Sample offset where the kept audio ends: the onset of the lookahead's
-    first speech group — the chunk keeps its own rendered punctuation pause
-    and word gap, so its last word coarticulates into a real pause instead
-    of end-of-utterance decay. None → run has no text of its own (caller
-    falls back to the tail-pad trim)."""
+def _lookahead_cut(ids, dur, n_lookahead_phonemes: int):
+    """Sample offset where the kept audio ends: locate the lookahead's
+    first word onset (phoneme count + onset snap, ties later — keeping a
+    sliver of lookahead beats clipping the last word), then walk back off
+    the space run before it. The chunk keeps its own rendered punctuation
+    pause but not the word gap, whose frames carry the next word's onset
+    bleed. None → the run has no text of its own (caller falls back to
+    the tail-pad trim)."""
     onsets = _speech_onsets(ids)
-    if len(onsets) <= n_lookahead_words:
+    target = _speech_total(ids) - n_lookahead_phonemes
+    if target <= 0 or not onsets:
         return None
-    return _cum_samples(dur)[onsets[-n_lookahead_words]]
+    idx, before = min(onsets,
+                      key=lambda o: (abs(o[1] - target), -o[0]))
+    if before == 0:
+        return None  # cut would discard the whole run
+    while idx > 1 and ids[idx - 1] == SPACE_ID:
+        idx -= 1
+    return _cum_samples(dur)[idx]
 
 
 def _tail_silence_frames(ids, dur) -> int:
@@ -219,8 +246,8 @@ def _tail_silence_frames(ids, dur) -> int:
     return frames
 
 
-def _trim_run(ids, wav, dur, n_context_words: int = 0,
-              n_lookahead_words: int = 0):
+def _trim_run(ids, wav, dur, n_context_phonemes: int = 0,
+              n_lookahead_phonemes: int = 0):
     """Return the speech-bearing slice of one raw (flat) run: context
     prefix / lookahead suffix (if any) cut at their word gaps, lead/tail
     non-speech reduced to small margins. Pure sequence ops — unit-tested
@@ -228,13 +255,13 @@ def _trim_run(ids, wav, dur, n_context_words: int = 0,
     total = _cum_samples(dur)
     if len(wav) != total[-1]:  # duration contract broken; don't touch it
         return wav
-    if n_context_words > 0:
-        start = _context_cut(ids, dur, n_context_words)
+    if n_context_phonemes > 0:
+        start = _context_cut(ids, dur, n_context_phonemes)
     else:
         start = max(0, (int(dur[0]) - HEAD_KEEP)) * FRAME
     end = None
-    if n_lookahead_words > 0:
-        end = _lookahead_cut(ids, dur, n_lookahead_words)
+    if n_lookahead_phonemes > 0:
+        end = _lookahead_cut(ids, dur, n_lookahead_phonemes)
     if end is None:
         tail_pad = max(0, _tail_silence_frames(ids, dur) - TAIL_KEEP) * FRAME
         end = len(wav) - tail_pad
@@ -263,11 +290,11 @@ def _synth_direct(model, om, req) -> bool:
         # so espeak expansions ("42" → two words) stay consistent with the
         # full render's token stream.
         if context:
-            n_ctx = _speech_word_count(backend.phonemize([context])[0])
+            n_ctx = _speech_phoneme_count(backend.phonemize([context])[0])
             if n_ctx == 0:
                 context = ""
         if lookahead:
-            n_la = _speech_word_count(backend.phonemize([lookahead])[0])
+            n_la = _speech_phoneme_count(backend.phonemize([lookahead])[0])
             if n_la == 0:
                 lookahead = ""
     full = " ".join(s for s in (context, text, lookahead) if s)
@@ -296,13 +323,14 @@ def _synth_direct(model, om, req) -> bool:
     # boundary: a context ending in one comes back as its own leading run
     # (or several) and a lookahead past one as its own trailing run — they
     # conditioned nothing, so drop them whole instead of rendering them.
+    # The +2 margin absorbs espeak's context-dependent realizations.
     while n_ctx and len(runs) > 1:
-        run_words = len(_speech_onsets(runs[0][0]))
-        if run_words > n_ctx:
+        run_ph = _speech_total(runs[0][0])
+        if run_ph > n_ctx + 2:
             break
         runs = runs[1:]
-        n_ctx -= run_words
-    if n_la and len(runs) > 1 and len(_speech_onsets(runs[-1][0])) <= n_la:
+        n_ctx = max(0, n_ctx - run_ph)
+    if n_la and len(runs) > 1 and _speech_total(runs[-1][0]) <= n_la + 2:
         runs = runs[:-1]
         n_la = 0
 
