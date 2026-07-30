@@ -243,23 +243,42 @@ def test_pause_targets_maps_marks_to_token_ids():
     assert kitten_daemon._pause_targets({"pad_marks": {"€": 1}}) == {}
 
 
-def test_pause_insert_tops_up_a_short_rendered_pause():
-    # word ':' space word — the mark's group renders 1 frame of silence,
-    # topped up to 150ms (3600 samples at 24k).
+def test_pause_insert_lands_inside_the_rendered_silence():
+    # word ':' space word — the mark's frames carry 2 frames of real
+    # silence, topped up to 150ms and spliced at the middle of it.
     ids = [VOCAB["a"], VOCAB[":"], VOCAB[" "], VOCAB["b"]]
     dur = [1, 1, 1, 1]
     wav = _loud(FRAME) + _quiet(2 * FRAME) + _loud(FRAME)
-    got = inserts(wav, ids, dur, {VOCAB[":"]: 150})
-    assert got == [(3 * FRAME, int(SR * 0.150) - 2 * FRAME)]
-
-
-def test_pause_insert_measures_actual_silence_not_token_duration():
-    # The silence run spills past the token boundary; the top-up is
-    # measured against the waveform, so the total lands on target.
-    ids = [VOCAB["a"], VOCAB[":"], VOCAB[" "], VOCAB["b"]]
-    dur = [1, 1, 1, 2]
-    wav = _loud(FRAME) + _quiet(3 * FRAME) + _loud(2 * FRAME)
     (at, n), = inserts(wav, ids, dur, {VOCAB[":"]: 150})
+    assert at == 2 * FRAME                       # centre of the silence
+    assert n == int(SR * 0.150) - 2 * FRAME
+
+
+def test_pause_insert_ignores_the_token_boundary_when_it_is_voiced():
+    # The alignment puts the boundary inside the next vowel (this is what
+    # happened on "the panel: is the" — the first attempt chopped it).
+    # The silence one frame earlier is the real pause.
+    ids = [VOCAB["a"], VOCAB[":"], VOCAB[" "], VOCAB["b"]]
+    dur = [1, 1, 1, 1]
+    wav = _loud(FRAME) + _quiet(FRAME) + _loud(2 * FRAME)
+    (at, _), = inserts(wav, ids, dur, {VOCAB[":"]: 150})
+    boundary = 3 * FRAME
+    assert at < boundary
+    assert abs(float(wav[at])) < 0.006          # spliced into silence
+
+
+def test_no_insert_when_the_mark_has_no_rendered_pause():
+    # Never cut through voiced audio to make a pause that isn't there.
+    ids = [VOCAB["a"], VOCAB[":"], VOCAB[" "], VOCAB["b"]]
+    dur = [1, 1, 1, 1]
+    assert inserts(_loud(4 * FRAME), ids, dur, {VOCAB[":"]: 150}) == []
+
+
+def test_pause_insert_measures_the_silence_it_found():
+    ids = [VOCAB["a"], VOCAB[":"], VOCAB[" "], VOCAB["b"]]
+    dur = [1, 2, 1, 1]
+    wav = _loud(FRAME) + _quiet(3 * FRAME) + _loud(FRAME)
+    (_, n), = inserts(wav, ids, dur, {VOCAB[":"]: 150})
     assert n == int(SR * 0.150) - 3 * FRAME
 
 
@@ -299,3 +318,14 @@ def test_splice_ignores_inserts_outside_the_slice():
     wav = np.arange(100, dtype=np.float32)
     out = splice(wav, [(5, 10), (95, 10)], 20, 80)
     assert len(out) == 60
+
+
+def test_pause_measures_silence_running_past_the_search_window():
+    # The mark's frames only overlap part of the pause; measuring just
+    # that part would overshoot the target (150ms asked, 190ms delivered
+    # on the first try).
+    ids = [VOCAB["a"], VOCAB[":"], VOCAB[" "], VOCAB["b"]]
+    dur = [2, 1, 1, 1]
+    wav = _loud(FRAME) + _quiet(4 * FRAME) + _loud(FRAME)
+    (_, n), = inserts(wav, ids, dur, {VOCAB[":"]: 150})
+    assert n == int(SR * 0.150) - 4 * FRAME

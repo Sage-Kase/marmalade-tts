@@ -312,16 +312,24 @@ _ID_CHAR = {i: s for s, i in VOCAB.items()}
 _SIL_LEVEL = 0.006  # |sample| below this is silence (≈200/32768, the lab's SIL)
 
 
-def _silence_span(wav, at: int):
-    """(first, last) sample bounds of the silence run touching sample ``at``."""
-    lo = at
-    while lo > 0 and abs(float(wav[lo - 1])) < _SIL_LEVEL:
-        lo -= 1
-    hi = at
-    n = len(wav)
-    while hi < n and abs(float(wav[hi])) < _SIL_LEVEL:
-        hi += 1
-    return lo, hi
+MIN_PAUSE_SAMPLES = 240   # 10ms — below this the mark has no rendered pause
+
+
+def _quiet_span(wav, lo: int, hi: int):
+    """(start, end) of the longest near-silent run inside [lo, hi)."""
+    best_s = best_e = lo
+    i, n = max(0, lo), min(hi, len(wav))
+    while i < n:
+        if abs(float(wav[i])) < _SIL_LEVEL:
+            j = i
+            while j < n and abs(float(wav[j])) < _SIL_LEVEL:
+                j += 1
+            if j - i > best_e - best_s:
+                best_s, best_e = i, j
+            i = j
+        else:
+            i += 1
+    return best_s, best_e
 
 
 def _pause_inserts(wav, ids, dur, targets: dict) -> list:
@@ -330,11 +338,17 @@ def _pause_inserts(wav, ids, dur, targets: dict) -> list:
 
     The model renders its own pause per mark (measured 2026-07-29: period
     225ms · ! 146 · ? 114 · : 87 · ; 57 · , 44), and some are shorter than
-    they read — Max flagged the colon. Topping up is measured against the
-    ACTUAL silence in the waveform (same definition the probe used), not
-    against token durations, so a 150ms target really yields 150ms of
-    silence whatever the surrounding phonemes do. A mark in the trailing
-    group is skipped: the tail trim owns that boundary."""
+    they read — Max flagged the colon.
+
+    Where the silence goes matters as much as how much. The duration output
+    is an alignment, not an acoustic segmentation: on "the panel: is the"
+    the token boundary after ':' lands ~90ms into the following vowel, and
+    splicing there chops it (Max, first attempt: "improperly stitched
+    together"). So the pause is placed inside the actual near-silent run
+    within the frames the model assigned to the mark — the top-up is
+    measured against that run, and a mark with no rendered pause at all is
+    left alone rather than cut through.
+    """
     if not targets:
         return []
     cum = _cum_samples(dur)
@@ -347,12 +361,22 @@ def _pause_inserts(wav, ids, dur, targets: dict) -> list:
         while j + 1 < len(ids) and 0 < ids[j + 1] <= SPACE_ID:
             j += 1
         if j + 1 >= len(ids) or ids[j + 1] == 0:
+            continue  # trailing group — the tail trim owns that boundary
+        # One frame of slack each side: the alignment is good to about
+        # that, and the mark's pause can start just before its own frames.
+        start, end = _quiet_span(wav, cum[i] - FRAME, cum[j + 1] + FRAME)
+        if end - start < MIN_PAUSE_SAMPLES:
             continue
-        at = cum[j + 1]
-        lo, hi = _silence_span(wav, at)
-        extra = int(SAMPLE_RATE * float(ms) / 1000) - (hi - lo)
+        # The window locates the pause; the pause itself may run past it,
+        # and the top-up has to be measured against the whole thing or the
+        # mark ends up longer than asked for.
+        while start > 0 and abs(float(wav[start - 1])) < _SIL_LEVEL:
+            start -= 1
+        while end < len(wav) and abs(float(wav[end])) < _SIL_LEVEL:
+            end += 1
+        extra = int(SAMPLE_RATE * float(ms) / 1000) - (end - start)
         if extra > 0:
-            inserts.append((at, extra))
+            inserts.append(((start + end) // 2, extra))
     return inserts
 
 
