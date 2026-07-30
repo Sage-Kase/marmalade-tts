@@ -308,6 +308,74 @@ def _ph_request_ids(ctx: str, text: str, la: str):
     return ids, i_text, i_la
 
 
+_ID_CHAR = {i: s for s, i in VOCAB.items()}
+_SIL_LEVEL = 0.006  # |sample| below this is silence (≈200/32768, the lab's SIL)
+
+
+def _silence_span(wav, at: int):
+    """(first, last) sample bounds of the silence run touching sample ``at``."""
+    lo = at
+    while lo > 0 and abs(float(wav[lo - 1])) < _SIL_LEVEL:
+        lo -= 1
+    hi = at
+    n = len(wav)
+    while hi < n and abs(float(wav[hi])) < _SIL_LEVEL:
+        hi += 1
+    return lo, hi
+
+
+def _pause_inserts(wav, ids, dur, targets: dict) -> list:
+    """[(sample_position, zeros_to_insert)] so each marked punctuation joint
+    reaches its target total silence.
+
+    The model renders its own pause per mark (measured 2026-07-29: period
+    225ms · ! 146 · ? 114 · : 87 · ; 57 · , 44), and some are shorter than
+    they read — Max flagged the colon. Topping up is measured against the
+    ACTUAL silence in the waveform (same definition the probe used), not
+    against token durations, so a 150ms target really yields 150ms of
+    silence whatever the surrounding phonemes do. A mark in the trailing
+    group is skipped: the tail trim owns that boundary."""
+    if not targets:
+        return []
+    cum = _cum_samples(dur)
+    inserts = []
+    for i, tid in enumerate(ids):
+        ms = targets.get(tid)
+        if ms is None:
+            continue
+        j = i
+        while j + 1 < len(ids) and 0 < ids[j + 1] <= SPACE_ID:
+            j += 1
+        if j + 1 >= len(ids) or ids[j + 1] == 0:
+            continue
+        at = cum[j + 1]
+        lo, hi = _silence_span(wav, at)
+        extra = int(SAMPLE_RATE * float(ms) / 1000) - (hi - lo)
+        if extra > 0:
+            inserts.append((at, extra))
+    return inserts
+
+
+def _splice(wav, inserts: list, start: int, end: int):
+    """wav[start:end] with the in-range inserts realized as silence."""
+    import numpy as np
+    pieces, pos = [], start
+    for at, n in inserts:
+        if not (start < at < end):
+            continue
+        pieces.append(wav[pos:at])
+        pieces.append(np.zeros(n, dtype=wav.dtype))
+        pos = at
+    pieces.append(wav[pos:end])
+    return np.concatenate(pieces)
+
+
+def _pause_targets(req) -> dict:
+    """{token_id: target_ms} from the request's ``pad_marks`` map."""
+    raw = req.get("pad_marks") or {}
+    return {VOCAB[m]: ms for m, ms in raw.items() if m in VOCAB}
+
+
 def _synth_phonemes(om, req):
     """Exact-cut synthesis from pre-phonemized input. Same boundary policy
     as the text path — head cuts back off one frame into the gap, tail
@@ -351,7 +419,11 @@ def _synth_phonemes(om, req):
     else:
         end = len(wav) - max(0, _tail_silence_frames(ids, dur)
                              - TAIL_KEEP) * FRAME
-    sf.write(req["out"], wav[start:end] if start < end else wav, SAMPLE_RATE)
+    if start >= end:
+        start, end = 0, len(wav)
+    out_wav = _splice(wav, _pause_inserts(wav, ids, dur, _pause_targets(req)),
+                      start, end)
+    sf.write(req["out"], out_wav, SAMPLE_RATE)
 
 
 def _synth_direct(model, om, req) -> bool:

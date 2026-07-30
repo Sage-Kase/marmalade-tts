@@ -10,6 +10,8 @@ fix_en_phonemes in kitten-daemon.py.
 import importlib.util
 import os
 
+import pytest
+
 _DAEMON_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "daemon", "kitten-daemon.py",
@@ -216,3 +218,84 @@ def test_trim_lookahead_fallback_to_tail_pad():
     out = trim(ids, wav, dur, n_lookahead_phonemes=2)
     end = len(wav) - (18 - kitten_daemon.TAIL_KEEP) * FRAME
     assert out[-1] == wav[end - 1]
+
+
+# ── Punctuation pause top-up (Max: the colon reads as no pause) ─────────────
+
+VOCAB = kitten_daemon.VOCAB
+inserts = kitten_daemon._pause_inserts
+splice = kitten_daemon._splice
+SR = kitten_daemon.SAMPLE_RATE
+
+
+def _loud(n):
+    return [1.0] * n
+
+
+def _quiet(n):
+    return [0.0] * n
+
+
+def test_pause_targets_maps_marks_to_token_ids():
+    assert kitten_daemon._pause_targets({"pad_marks": {":": 150}}) == {
+        VOCAB[":"]: 150}
+    assert kitten_daemon._pause_targets({}) == {}
+    assert kitten_daemon._pause_targets({"pad_marks": {"€": 1}}) == {}
+
+
+def test_pause_insert_tops_up_a_short_rendered_pause():
+    # word ':' space word — the mark's group renders 1 frame of silence,
+    # topped up to 150ms (3600 samples at 24k).
+    ids = [VOCAB["a"], VOCAB[":"], VOCAB[" "], VOCAB["b"]]
+    dur = [1, 1, 1, 1]
+    wav = _loud(FRAME) + _quiet(2 * FRAME) + _loud(FRAME)
+    got = inserts(wav, ids, dur, {VOCAB[":"]: 150})
+    assert got == [(3 * FRAME, int(SR * 0.150) - 2 * FRAME)]
+
+
+def test_pause_insert_measures_actual_silence_not_token_duration():
+    # The silence run spills past the token boundary; the top-up is
+    # measured against the waveform, so the total lands on target.
+    ids = [VOCAB["a"], VOCAB[":"], VOCAB[" "], VOCAB["b"]]
+    dur = [1, 1, 1, 2]
+    wav = _loud(FRAME) + _quiet(3 * FRAME) + _loud(2 * FRAME)
+    (at, n), = inserts(wav, ids, dur, {VOCAB[":"]: 150})
+    assert n == int(SR * 0.150) - 3 * FRAME
+
+
+def test_no_insert_when_the_pause_is_already_long_enough():
+    ids = [VOCAB["a"], VOCAB[":"], VOCAB[" "], VOCAB["b"]]
+    dur = [1, 8, 1, 1]
+    wav = _loud(FRAME) + _quiet(9 * FRAME) + _loud(FRAME)
+    assert inserts(wav, ids, dur, {VOCAB[":"]: 150}) == []
+
+
+def test_trailing_mark_is_left_to_the_tail_trim():
+    ids = [VOCAB["a"], VOCAB[":"], 0]
+    dur = [1, 1, 1]
+    wav = _loud(FRAME) + _quiet(2 * FRAME)
+    assert inserts(wav, ids, dur, {VOCAB[":"]: 150}) == []
+
+
+def test_unmarked_punctuation_is_untouched():
+    ids = [VOCAB["a"], VOCAB[";"], VOCAB[" "], VOCAB["b"]]
+    dur = [1, 1, 1, 1]
+    wav = _loud(FRAME) + _quiet(2 * FRAME) + _loud(FRAME)
+    assert inserts(wav, ids, dur, {VOCAB[":"]: 150}) == []
+
+
+def test_splice_inserts_silence_inside_the_kept_slice():
+    # _splice is the one helper needing the array type the daemon uses;
+    # numpy lives in the kitten venv, not the repo's test env.
+    np = pytest.importorskip("numpy")
+    wav = np.arange(100, dtype=np.float32)
+    out = splice(wav, [(50, 10)], 20, 80)
+    assert len(out) == 70
+    assert out[29] == 49 and list(out[30:40]) == [0] * 10 and out[40] == 50
+
+
+def test_splice_ignores_inserts_outside_the_slice():
+    np = pytest.importorskip("numpy")
+    wav = np.arange(100, dtype=np.float32)
+    out = splice(wav, [(5, 10), (95, 10)], 20, 80)
+    assert len(out) == 60
