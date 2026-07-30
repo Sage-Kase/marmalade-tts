@@ -444,14 +444,14 @@ def synth(model, req):
     check_loaded("kitten", MODEL_REPOS.get(want, want), MODEL_REPO)
     if req.get("op") == "phonemize":
         # Phase 1 of the phoneme-direct path: espeak the whole utterance
-        # once (~2ms/paragraph) with the same preprocessor + fixups the
-        # text path uses; result written as a text file to req["out"].
+        # once (~2ms/paragraph), with the same fixups the text path gets.
+        # NOT the wrapper's TextPreprocessor: KittenTTS.generate defaults
+        # clean_text=False, so the text path never runs it — applying it
+        # here lowercased text and expanded contractions ("I'm" → "i am",
+        # heard on the 2026-07-29 lab round). espeak handles contractions
+        # and numbers natively.
         om = model.model
-        text = req["text"]
-        pre = getattr(om, "preprocessor", None)
-        if pre is not None:
-            text = pre(text)
-        ph = om.phonemizer.phonemize([text])[0]
+        ph = om.phonemizer.phonemize([req["text"]])[0]
         with open(req["out"], "w", encoding="utf-8") as f:
             f.write(ph)
         return
