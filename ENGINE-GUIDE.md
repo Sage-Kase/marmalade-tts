@@ -478,6 +478,26 @@ already uses ORT intra-op threads. Measured on kitten micro: 6-chunk input
 time-to-first-audio is unchanged (the first chunk renders alone to warm the
 daemon and avoid racing auto-start).
 
+**Streamed playback: two conditioning paths.** `stream_play.py` renders
+chunks ahead of the play head, and the seam between them is where quality
+is won or lost. Two engine flags select how:
+
+- **Text path** — `STREAM_CONTEXT` / `STREAM_LOOKAHEAD`. The daemon is sent
+  the previous chunk's last words as `context` and the next chunk's first
+  words as `lookahead`; it renders them and cuts them away by counting
+  phonemes and snapping to word onsets. The counting is approximate by
+  nature (espeak realizes a snippet differently in isolation than in
+  context), so this path exists for engines that only accept text.
+- **Phoneme path** — `PHONEME_STREAM` plus `phonemize(text)` and
+  `synthesize_phonemes(ph_text, out, context=…, lookahead=…, style_ref=…,
+  pad_marks=…)`. The client phonemizes the whole utterance once, plans the
+  stream in phoneme space (`chunking.ph_stream_plan`) and every cut is an
+  exact token index. Prefer this whenever the engine's G2P is reachable:
+  the boundaries are exact, sentence runs keep their closing quotes, and
+  one style-pack row can be pinned for the whole utterance so chunks don't
+  drift in timbre. Kitten in daemon mode uses it; the text path stays as
+  the fallback for subprocess mode and for any caller passing text.
+
 > **Note for pocket:** Pocket TTS loads in ~200ms, so **no daemon is needed**.
 > This step was intentionally skipped for pocket.
 

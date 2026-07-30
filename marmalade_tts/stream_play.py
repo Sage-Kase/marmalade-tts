@@ -25,6 +25,13 @@ which itself becomes the first measurement. If the estimate is ever
 wrong, playback degrades to a gap (the consumer waits for the next
 chunk), never to corruption.
 
+Engines that advertise ``PHONEME_STREAM`` (kitten in daemon mode) plan the
+whole stream in phoneme space instead of text: one espeak call up front,
+sentence runs split on the real marks, sub-sentence chunks conditioned at
+exact token indices, uniform inter-run gaps, one pinned style row. See
+``chunking.ph_stream_plan``. Everything below the plan — the gate, the
+worker pool, perfstats — is identical either way.
+
 Used only when: playing (not --no-play), single utterance, no effects
 (effects are applied to whole files and would differ chunk-by-chunk),
 and the text actually chunks. Everything else keeps the old path.
@@ -52,6 +59,19 @@ SAFETY = 1.5
 CONTEXT_WORDS = 4
 LOOKAHEAD_WORDS = 2
 
+# Phoneme-direct streaming (engines advertising PHONEME_STREAM): the whole
+# utterance is phonemized once and the stream is planned in phoneme space —
+# see chunking.ph_stream_plan for what each part buys and which listening
+# round decided it.
+#
+# KEEP_TERMINAL_MARKS: terminal marks NOT swapped for a comma before
+# rendering. '.' and '?' are decided (swap). '!' is under test — the swap
+# may flatten exclamation intonation (2026-07-30 lab, R12 rows).
+KEEP_TERMINAL_MARKS = ""
+# The model renders an intra-sentence colon in ~87ms, which reads as no
+# pause at all; topped up to a floor of inserted silence.
+PAD_MARKS = {":": 150}
+
 
 def should_start(buffered_audio_s: float, remaining_chunk_chars: list[int],
                  est: "tuple[float, float] | None",
@@ -76,6 +96,28 @@ def should_start(buffered_audio_s: float, remaining_chunk_chars: list[int],
             return False
         t_needed += audio
     return True
+
+
+def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict):
+    """(plan, style_ref) for the phoneme-direct path, or (None, None) when
+    the engine doesn't support it or phonemization fails — the caller then
+    plans in text space. Never fatal: this is an optimization over a path
+    that already works."""
+    if not getattr(engine, "PHONEME_STREAM", False):
+        return None, None
+    try:
+        ph = engine.phonemize(text, voice=synth_kwargs.get("voice"))
+    except Exception:  # daemon down, engine mid-refactor — use the text path
+        return None, None
+    if not ph or not ph.strip():
+        return None, None
+    plan = chunking.ph_stream_plan(ph, max_chars,
+                                   keep_marks=KEEP_TERMINAL_MARKS)
+    # One style row for the whole utterance: the length-indexed row the
+    # model would have used for a single whole render, so chunks can't
+    # drift in timbre between them (P11 — neighbouring rows are audible).
+    # The daemon clamps to the pack's row count.
+    return (plan, len(ph)) if plan else (None, None)
 
 
 def _effective_workers(engine, n_rest: int) -> int:
@@ -115,11 +157,20 @@ def try_stream_single(
     max_chars = chunking.resolve_max_chars(engine, eng_cfg)
     if max_chars is None:
         return None
-    chunks = chunking.chunk_for_streaming(processed, max_chars)
+
+    plan, style_ref = _phoneme_plan(engine, processed, max_chars, synth_kwargs)
+    if plan is not None:
+        chunks = [p.text for p in plan]
+    else:
+        chunks = chunking.chunk_for_streaming(processed, max_chars)
     if len(chunks) < 2:
         return None
 
     mkey = perfstats.model_key(engine, eng_cfg)
+    if plan is not None:
+        # Phoneme chars ≈ 1.1× text chars; a shared chars-per-audio-second
+        # EMA would drift the gate's estimates. Separate key, same model.
+        mkey = f"{mkey}:ph"
     n = len(chunks)
     workers = _effective_workers(engine, n - 1)
 
@@ -140,19 +191,32 @@ def try_stream_single(
     def _render_one(i: int):
         t0 = time.monotonic()
         kwargs = dict(synth_kwargs)
-        if use_context and i > 0:
-            kwargs["context"] = " ".join(
-                chunks[i - 1].split()[-CONTEXT_WORDS:])
-        if use_lookahead and i < n - 1:
-            kwargs["lookahead"] = " ".join(
-                chunks[i + 1].split()[:LOOKAHEAD_WORDS])
-        engine.synthesize(chunks[i], tmp_paths[i], **kwargs)
+        if plan is not None:
+            piece = plan[i]
+            engine.synthesize_phonemes(
+                piece.text, tmp_paths[i], context=piece.context,
+                lookahead=piece.lookahead, style_ref=style_ref,
+                pad_marks=PAD_MARKS, **kwargs)
+        else:
+            if use_context and i > 0:
+                kwargs["context"] = " ".join(
+                    chunks[i - 1].split()[-CONTEXT_WORDS:])
+            if use_lookahead and i < n - 1:
+                kwargs["lookahead"] = " ".join(
+                    chunks[i + 1].split()[:LOOKAHEAD_WORDS])
+            engine.synthesize(chunks[i], tmp_paths[i], **kwargs)
         dt = time.monotonic() - t0
         # Recorded audio duration is post-trim while render time includes
         # the discarded context prefix — the EMA absorbs the overhead, so
         # the gate stays honest about the true cost per emitted second.
         dur = cli.wav_duration(tmp_paths[i])
         perfstats.record(engine_name, mkey, len(chunks[i]), dt, dur)
+        if plan is not None and plan[i].gap_after_ms:
+            # Inter-run silence rides on the chunk that closes the run, so
+            # it plays and concatenates with no extra bookkeeping. Recorded
+            # after perfstats: it is not rendered audio.
+            chunking.pad_wav_end(tmp_paths[i], plan[i].gap_after_ms)
+            dur += plan[i].gap_after_ms / 1000.0
         with cond:
             ready[i] = dur
             cond.notify_all()

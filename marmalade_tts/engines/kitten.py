@@ -35,6 +35,11 @@ class KittenEngine(Engine):
         # sample-exactly (duration output).
         self.STREAM_CONTEXT = self.use_daemon
         self.STREAM_LOOKAHEAD = self.use_daemon
+        # Phoneme-direct streaming: the client phonemizes once and plans the
+        # whole stream in phoneme space (chunking.ph_stream_plan). Supersedes
+        # STREAM_CONTEXT/STREAM_LOOKAHEAD on the streaming path — those stay
+        # for the text path (subprocess mode, and any caller passing text).
+        self.PHONEME_STREAM = self.use_daemon
 
     def _repo(self) -> str:
         return MODEL_REPOS.get(self.model_size, self.model_size)
@@ -66,6 +71,46 @@ class KittenEngine(Engine):
         run_in_venv(KITTEN_PYTHON, cmd,
                     env_extra={"CUDA_VISIBLE_DEVICES": "", "HF_HUB_OFFLINE": "1"},
                     engine_name="kitten")
+
+    def phonemize(self, text: str, voice: str = None, **kwargs) -> str:
+        """espeak the whole utterance once, via the daemon (~2ms/paragraph).
+        Phase 1 of the phoneme-direct streaming path."""
+        import tempfile
+        fd, tmp = tempfile.mkstemp(prefix="marmalade-ph-", suffix=".txt")
+        os.close(fd)
+        try:
+            dmgr.synthesize("kitten", {
+                "op": "phonemize", "text": text, "voice": voice or self.voice,
+                "model": self._repo(), "out": tmp}, auto_start=True)
+            with open(tmp, encoding="utf-8") as f:
+                return f.read().strip()
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+    def synthesize_phonemes(self, ph_text: str, out_path: str, voice: str = None,
+                            speed: float = 1.0, context: str = None,
+                            lookahead: str = None, style_ref: int = None,
+                            pad_marks: dict = None, **kwargs):
+        """Synthesize from phonemes with exact-index conditioning cuts.
+
+        ``style_ref`` pins the style-pack row (the wrapper indexes it by
+        input length, and neighbouring rows are audibly different — Max's
+        P11 verdict), ``pad_marks`` tops up a mark's rendered pause with
+        inserted silence."""
+        request = {"ph_text": ph_text, "voice": voice or self.voice,
+                   "speed": speed, "model": self._repo(), "out": out_path}
+        if context:
+            request["ph_context"] = context
+        if lookahead:
+            request["ph_lookahead"] = lookahead
+        if style_ref is not None:
+            request["style_ref"] = int(style_ref)
+        if pad_marks:
+            request["pad_marks"] = pad_marks
+        dmgr.synthesize("kitten", request, auto_start=True)
 
     def list_voices(self):
         print(f"Kitten TTS voices: {', '.join(VOICES)}")

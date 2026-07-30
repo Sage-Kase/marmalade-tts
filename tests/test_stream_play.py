@@ -308,3 +308,91 @@ class TestTryStreamSingle:
         # rtf 50 with 1 worker: gate can't open until (nearly) everything
         # is rendered.
         assert rendered_at_first_play[0] >= total - 1
+
+
+# ── phoneme-direct streaming path ────────────────────────────────────────────
+
+
+def _fake_ph_engine(ph: str, max_chars=500):
+    """An engine that phonemizes (returning ``ph`` verbatim) and renders
+    from phonemes — the kitten-in-daemon-mode shape."""
+    class Fake:
+        MAX_CHARS = max_chars
+        PARALLEL_CHUNKS = False
+        PHONEME_STREAM = True
+        model_size = "test"
+
+        def __init__(self):
+            self.ph_calls = []
+            self.text_calls = []
+
+        def phonemize(self, text, voice=None, **kw):
+            return ph
+
+        def synthesize_phonemes(self, ph_text, out_path, **kw):
+            _silent_wav(out_path, duration_s=0.05, rate=24000)
+            self.ph_calls.append((ph_text, kw))
+
+        def synthesize(self, text, out_path, **kw):
+            _silent_wav(out_path, duration_s=0.05, rate=24000)
+            self.text_calls.append(text)
+
+    return Fake()
+
+
+PH_TWO_RUNS = "wˈʌn wˈʌn wˈʌn. tˈuː tˈuː tˈuː."
+
+
+class TestPhonemeStream:
+    def test_renders_from_phonemes_not_text(self, tmp_path):
+        eng = _fake_ph_engine(PH_TWO_RUNS)
+        r = try_stream_single(
+            "One one one. Two two two.", str(tmp_path / "o.wav"),
+            engine=eng, engine_name="kitten", play=lambda p: None, **_COMMON)
+        assert r is not None
+        assert eng.text_calls == []
+        assert [c[0] for c in eng.ph_calls] == ["wˈʌn wˈʌn wˈʌn,",
+                                                "tˈuː tˈuː tˈuː,"]
+
+    def test_one_style_row_for_the_whole_utterance(self, tmp_path):
+        eng = _fake_ph_engine(PH_TWO_RUNS)
+        try_stream_single(
+            "One one one. Two two two.", str(tmp_path / "o.wav"),
+            engine=eng, engine_name="kitten", play=lambda p: None, **_COMMON)
+        rows = {kw["style_ref"] for _, kw in eng.ph_calls}
+        assert rows == {len(PH_TWO_RUNS)}
+
+    def test_inter_run_gap_lands_in_the_output(self, tmp_path):
+        eng = _fake_ph_engine(PH_TWO_RUNS)
+        out = str(tmp_path / "o.wav")
+        r = try_stream_single(
+            "One one one. Two two two.", out,
+            engine=eng, engine_name="kitten", play=lambda p: None, **_COMMON)
+        with wave.open(out, "rb") as w:
+            total = w.getnframes() / w.getframerate()
+        # two 50ms renders + one 150ms inter-run gap
+        assert total == pytest.approx(0.25, abs=0.005)
+        assert r.duration == pytest.approx(0.25, abs=0.005)
+
+    def test_falls_back_to_text_when_phonemize_fails(self, tmp_path):
+        eng = _fake_ph_engine(PH_TWO_RUNS, max_chars=40)
+
+        def boom(text, voice=None, **kw):
+            raise RuntimeError("daemon down")
+        eng.phonemize = boom
+
+        text = ("This is a sentence that has some length to it. " * 4).strip()
+        r = try_stream_single(
+            text, str(tmp_path / "o.wav"),
+            engine=eng, engine_name="kitten", play=lambda p: None, **_COMMON)
+        assert r is not None
+        assert eng.ph_calls == []
+        assert len(eng.text_calls) >= 2
+
+    def test_phoneme_stats_are_keyed_apart_from_text_stats(self, tmp_path):
+        eng = _fake_ph_engine(PH_TWO_RUNS)
+        try_stream_single(
+            "One one one. Two two two.", str(tmp_path / "o.wav"),
+            engine=eng, engine_name="kitten", play=lambda p: None, **_COMMON)
+        assert perfstats.estimate("kitten", "test:ph") is not None
+        assert perfstats.estimate("kitten", "test") is None
