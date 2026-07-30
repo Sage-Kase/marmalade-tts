@@ -177,6 +177,7 @@ def _fake_engine(render_delay=0.01, max_chars=120, parallel=False):
 
         def __init__(self):
             self.calls = []
+            self.call_kwargs = []
             self._lock = threading.Lock()
 
         def synthesize(self, text, out_path, **kw):
@@ -184,6 +185,7 @@ def _fake_engine(render_delay=0.01, max_chars=120, parallel=False):
             _silent_wav(out_path, duration_s=0.05)
             with self._lock:
                 self.calls.append(text)
+                self.call_kwargs.append(kw)
 
     return Fake()
 
@@ -219,6 +221,26 @@ class TestTryStreamSingle:
         # tmp chunks cleaned up
         assert all(not os.path.exists(p) for p in played)
         assert r.duration > 0
+
+    def test_context_and_lookahead_wiring(self, tmp_path):
+        eng = _fake_engine()
+        eng.STREAM_CONTEXT = True
+        eng.STREAM_LOOKAHEAD = True
+        text = " ".join(f"This is sentence number {i} with some extra "
+                        f"length to it." for i in range(6))
+        r = try_stream_single(
+            text, str(tmp_path / "o.wav"),
+            engine=eng, engine_name="fake", play=lambda p: None, **_COMMON)
+        assert r is not None and len(eng.calls) >= 3
+        # Renders may finish out of order; re-pair kwargs by chunk text.
+        by_text = dict(zip(eng.calls, eng.call_kwargs))
+        chunks = sorted(by_text, key=text.index)
+        first, mid, last = chunks[0], chunks[1], chunks[-1]
+        assert "context" not in by_text[first]
+        assert by_text[first]["lookahead"] == " ".join(mid.split()[:2])
+        assert by_text[mid]["context"] == " ".join(first.split()[-4:])
+        assert by_text[last]["context"]
+        assert "lookahead" not in by_text[last]
 
     def test_parallel_engine_overlaps_renders(self, tmp_path):
         eng = _fake_engine(render_delay=0.05, parallel=True)

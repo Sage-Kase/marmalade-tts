@@ -45,7 +45,12 @@ SAFETY = 1.5
 # Cross-chunk prosody conditioning: engines advertising STREAM_CONTEXT get
 # the last words of the previous chunk as rendered-then-discarded context,
 # so chunk N+1 opens as a continuation instead of a fresh utterance.
+# STREAM_LOOKAHEAD is the mirror image (Max's i5, 2026-07-29 lab verdict):
+# the next chunk's opening words render after the text and are cut away,
+# so the chunk's last word coarticulates into a real rendered pause
+# instead of end-of-utterance decay.
 CONTEXT_WORDS = 4
+LOOKAHEAD_WORDS = 2
 
 
 def should_start(buffered_audio_s: float, remaining_chunk_chars: list[int],
@@ -130,6 +135,7 @@ def try_stream_single(
     cond = threading.Condition()
 
     use_context = bool(getattr(engine, "STREAM_CONTEXT", False))
+    use_lookahead = bool(getattr(engine, "STREAM_LOOKAHEAD", False))
 
     def _render_one(i: int):
         t0 = time.monotonic()
@@ -137,6 +143,9 @@ def try_stream_single(
         if use_context and i > 0:
             kwargs["context"] = " ".join(
                 chunks[i - 1].split()[-CONTEXT_WORDS:])
+        if use_lookahead and i < n - 1:
+            kwargs["lookahead"] = " ".join(
+                chunks[i + 1].split()[:LOOKAHEAD_WORDS])
         engine.synthesize(chunks[i], tmp_paths[i], **kwargs)
         dt = time.monotonic() - t0
         # Recorded audio duration is post-trim while render time includes
