@@ -98,7 +98,8 @@ def should_start(buffered_audio_s: float, remaining_chunk_chars: list[int],
     return True
 
 
-def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict):
+def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict,
+                  engine_name: str, mkey: "str | None"):
     """(plan, style_ref) for the phoneme-direct path, or (None, None) when
     the engine doesn't support it or phonemization fails — the caller then
     plans in text space. Never fatal: this is an optimization over a path
@@ -111,8 +112,15 @@ def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict):
         return None, None
     if not ph or not ph.strip():
         return None, None
+    # Chunk sizes and conditioning depth follow the device's measured
+    # marginal RTF (chunking._STREAM_BANDS explains the cost model and
+    # what each band trades away).
+    band = chunking.band_for_rtf(perfstats.estimate_marginal(engine_name, mkey),
+                                 perfstats.band(engine_name, mkey))
     plan = chunking.ph_stream_plan(ph, max_chars,
-                                   keep_marks=KEEP_TERMINAL_MARKS)
+                                   keep_marks=KEEP_TERMINAL_MARKS, band=band)
+    if plan:
+        perfstats.set_band(engine_name, mkey, band.name)
     # One style row for the whole utterance: the length-indexed row the
     # model would have used for a single whole render, so chunks can't
     # drift in timbre between them (P11 — neighbouring rows are audible).
@@ -158,19 +166,20 @@ def try_stream_single(
     if max_chars is None:
         return None
 
-    plan, style_ref = _phoneme_plan(engine, processed, max_chars, synth_kwargs)
+    # Phoneme chars ≈ 1.1× text chars, so the two paths keep separate
+    # stats: a shared chars-per-audio-second EMA would drift the gate.
+    mkey = perfstats.model_key(engine, eng_cfg)
+    ph_key = f"{mkey}:ph"
+
+    plan, style_ref = _phoneme_plan(engine, processed, max_chars,
+                                    synth_kwargs, engine_name, ph_key)
     if plan is not None:
         chunks = [p.text for p in plan]
+        mkey = ph_key
     else:
         chunks = chunking.chunk_for_streaming(processed, max_chars)
     if len(chunks) < 2:
         return None
-
-    mkey = perfstats.model_key(engine, eng_cfg)
-    if plan is not None:
-        # Phoneme chars ≈ 1.1× text chars; a shared chars-per-audio-second
-        # EMA would drift the gate's estimates. Separate key, same model.
-        mkey = f"{mkey}:ph"
     n = len(chunks)
     workers = _effective_workers(engine, n - 1)
 
@@ -210,7 +219,15 @@ def try_stream_single(
         # the discarded context prefix — the EMA absorbs the overhead, so
         # the gate stays honest about the true cost per emitted second.
         dur = cli.wav_duration(tmp_paths[i])
-        perfstats.record(engine_name, mkey, len(chunks[i]), dt, dur)
+        cond_chars = 0
+        if plan is not None:
+            cond_chars = (len(plan[i].context or "")
+                          + len(plan[i].lookahead or ""))
+        # Chunk 0 always renders alone (it warms the daemon), so it is the
+        # one uncontended sample per utterance — the honest read on device
+        # speed that band selection needs.
+        perfstats.record(engine_name, mkey, len(chunks[i]), dt, dur,
+                         cond_chars=cond_chars, solo=(i == 0))
         if plan is not None and plan[i].gap_after_ms:
             # Inter-run silence rides on the chunk that closes the run, so
             # it plays and concatenates with no extra bookkeeping. Recorded

@@ -199,6 +199,106 @@ LOOKAHEAD_WORDS = 2   # conditioning suffix (i5)
 _CLAUSE_CLOSE_AT = 0.75
 
 
+# ── Chunk-size bands ────────────────────────────────────────────────────────
+# Chunk size is a performance knob (round-7 verdict: mid-sentence cuts sound
+# fine once trimmed and conditioned), so it should follow the device rather
+# than be a constant. Measured cost on kitten nano, 2026-07-30 (probe:
+# ~/coding/scratch/chunk-lab/rtf_bands.py, 5 reps per size):
+#
+#     bare render_s = 0.021 + 0.092 × audio_s      (fit over 20–400 ph chars)
+#     conditioning  = +2.0s of audio rendered and thrown away, per chunk,
+#                     independent of the chunk's own size (4 context words
+#                     + 2 lookahead words)
+#
+# So per-chunk overhead is dominated by conditioning, not by the request:
+# at 20 ph chars the chunk pays ×1.58 its own render; at 250 chars, ×1.09.
+# That is exactly Max's footgun — shrinking chunks makes measured RTF
+# worse, so a naive closed loop spirals. Two things stop it here:
+#
+#   1. Sizing reads the MARGINAL rtf (perfstats.estimate_marginal), which
+#      divides by the audio actually rendered including the discarded
+#      conditioning, and is therefore size-independent.
+#   2. Bands are stepped with a hysteresis margin, so a device sitting on
+#      an edge doesn't alternate.
+#
+# Band choice, from the cost model with a 0.6s time-to-first-audio target
+# and a ceiling of ~0.7 on the SUSTAINED effective RTF (above that the
+# playback gate stops opening early and streaming buys nothing):
+#
+#   fast (≤0.15)     conditioning is nearly free — keep the full ramp.
+#   moderate (≤0.35) conditioning still fits under the ceiling, but the
+#                    first chunk must shrink to hold TTFA under ~0.8s.
+#   slow (>0.35)     full conditioning no longer fits: 2s of discarded
+#                    audio per chunk would need ~4s chunks to stay under
+#                    the ceiling, i.e. multi-second TTFA. The 4 context
+#                    words go (they are three quarters of the cost); the
+#                    2 lookahead words stay, because dropping BOTH costs
+#                    word clarity at chunk tails — with no lookahead the
+#                    last word ends in utterance decay instead of
+#                    coarticulating, and faster-whisper stopped hearing
+#                    a chunk-final "the" on the P6 seam (2026-07-30).
+_STREAM_BANDS = (
+    # (name, upper marginal-RTF bound, ramp, context words, lookahead words)
+    ("fast", 0.15, (60, 100, 160, 250, 400), CONTEXT_WORDS, LOOKAHEAD_WORDS),
+    ("moderate", 0.35, (30, 60, 120, 220, 400), CONTEXT_WORDS, LOOKAHEAD_WORDS),
+    ("slow", float("inf"), (40, 90, 180, 320, 400), 0, LOOKAHEAD_WORDS),
+)
+
+# A band is only left once the estimate is this far past its edge.
+BAND_HYSTERESIS = 0.15
+
+
+class StreamBand:
+    __slots__ = ("name", "ramp", "context_words", "lookahead_words")
+
+    def __init__(self, name, ramp, context_words, lookahead_words):
+        self.name = name
+        self.ramp = ramp
+        self.context_words = context_words
+        self.lookahead_words = lookahead_words
+
+    def __repr__(self):
+        return f"StreamBand({self.name!r}, {self.ramp!r})"
+
+
+def _band(entry) -> StreamBand:
+    return StreamBand(entry[0], entry[2], entry[3], entry[4])
+
+
+def band_for_rtf(mrtf: "float | None",
+                 current: "str | None" = None) -> StreamBand:
+    """Pick the chunk-size band for a measured marginal RTF.
+
+    ``current`` is the band last used on this device; staying in it wins
+    ties within ``BAND_HYSTERESIS`` of the edge. With no measurement yet,
+    the fast band is the optimistic default — the first render is the
+    first measurement, and a wrong guess costs a gap, never a failure.
+    """
+    if mrtf is None:
+        return _band(_STREAM_BANDS[0])
+    for i, entry in enumerate(_STREAM_BANDS):
+        if mrtf <= entry[1]:
+            chosen = i
+            break
+    else:  # pragma: no cover — the last band is unbounded
+        chosen = len(_STREAM_BANDS) - 1
+    if current is None or current == _STREAM_BANDS[chosen][0]:
+        return _band(_STREAM_BANDS[chosen])
+    names = [e[0] for e in _STREAM_BANDS]
+    if current not in names:
+        return _band(_STREAM_BANDS[chosen])
+    cur = names.index(current)
+    # Leaving a band needs the estimate to clear the relevant edge by the
+    # hysteresis margin; otherwise stay put.
+    if chosen > cur:
+        edge = _STREAM_BANDS[cur][1]
+        return _band(_STREAM_BANDS[chosen if mrtf > edge * (1 + BAND_HYSTERESIS)
+                                   else cur])
+    edge = _STREAM_BANDS[cur - 1][1]
+    return _band(_STREAM_BANDS[chosen if mrtf < edge * (1 - BAND_HYSTERESIS)
+                               else cur])
+
+
 class PhPiece:
     """One rendered unit of a phoneme-space stream plan."""
 
@@ -278,22 +378,24 @@ def ph_pack(run: str, max_chars: int, step: int = 0,
 
 
 def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
-                   gap_ms: int = RUN_GAP_MS) -> list[PhPiece]:
+                   gap_ms: int = RUN_GAP_MS,
+                   band: "StreamBand | None" = None) -> list[PhPiece]:
     """The full streaming plan for one phonemized utterance."""
+    if band is None:
+        band = band_for_rtf(None)
     runs = ph_sentence_runs(ph, keep_marks)
     pieces: list[PhPiece] = []
     for ri, run in enumerate(runs):
-        subs = ph_pack(run, max_chars, step=len(pieces))
+        subs = ph_pack(run, max_chars, step=len(pieces), ramp=band.ramp)
         last_run = ri == len(runs) - 1
         for i, s in enumerate(subs):
             last_sub = i == len(subs) - 1
+            ctx = (" ".join(subs[i - 1].split()[-band.context_words:])
+                   if i and band.context_words else None)
+            la = (" ".join(subs[i + 1].split()[:band.lookahead_words])
+                  if not last_sub and band.lookahead_words else None)
             pieces.append(PhPiece(
-                s,
-                " ".join(subs[i - 1].split()[-CONTEXT_WORDS:]) if i else None,
-                (" ".join(subs[i + 1].split()[:LOOKAHEAD_WORDS])
-                 if not last_sub else None),
-                gap_ms if last_sub and not last_run else 0,
-            ))
+                s, ctx, la, gap_ms if last_sub and not last_run else 0))
     return pieces
 
 

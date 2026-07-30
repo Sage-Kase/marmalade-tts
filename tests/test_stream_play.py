@@ -396,3 +396,54 @@ class TestPhonemeStream:
             engine=eng, engine_name="kitten", play=lambda p: None, **_COMMON)
         assert perfstats.estimate("kitten", "test:ph") is not None
         assert perfstats.estimate("kitten", "test") is None
+
+
+class TestMarginalRtf:
+    def test_marginal_rtf_discounts_discarded_conditioning(self):
+        # 1s of kept audio at 20 chars/s, plus 20 chars of conditioning
+        # (another 1s rendered and thrown away), rendered in 0.4s.
+        perfstats.record("kitten", "nano:ph", chars=20, render_s=0.4,
+                         audio_s=1.0, cond_chars=20)
+        rtf, _ = perfstats.estimate("kitten", "nano:ph")
+        assert rtf == pytest.approx(0.4)          # per second KEPT
+        assert perfstats.estimate_marginal("kitten", "nano:ph") == \
+            pytest.approx(0.2)                     # per second RENDERED
+
+    def test_marginal_rtf_is_stable_across_chunk_sizes(self):
+        # The same device, same conditioning cost, half the chunk size:
+        # plain RTF jumps, marginal RTF does not. This is what stops the
+        # size→rtf→size feedback loop.
+        perfstats.record("kitten", "big", chars=40, render_s=0.6,
+                         audio_s=2.0, cond_chars=20)
+        perfstats.record("kitten", "small", chars=20, render_s=0.4,
+                         audio_s=1.0, cond_chars=20)
+        big, small = (perfstats.estimate("kitten", k)[0]
+                      for k in ("big", "small"))
+        assert small > big * 1.3
+        assert (perfstats.estimate_marginal("kitten", "small")
+                == pytest.approx(perfstats.estimate_marginal("kitten", "big")))
+
+    def test_falls_back_to_plain_rtf_for_old_entries(self):
+        perfstats.record("kitten", "old", chars=20, render_s=0.4, audio_s=1.0)
+        assert perfstats.estimate_marginal("kitten", "old") == \
+            pytest.approx(0.4)
+
+    def test_band_round_trips(self):
+        assert perfstats.band("kitten", "nano:ph") is None
+        perfstats.set_band("kitten", "nano:ph", "moderate")
+        assert perfstats.band("kitten", "nano:ph") == "moderate"
+        perfstats.record("kitten", "nano:ph", chars=20, render_s=0.4,
+                         audio_s=1.0)
+        assert perfstats.band("kitten", "nano:ph") == "moderate"
+
+    def test_only_solo_renders_move_the_marginal_average(self):
+        perfstats.record("kitten", "m", chars=20, render_s=0.2, audio_s=1.0,
+                         solo=True)
+        before = perfstats.estimate_marginal("kitten", "m")
+        # A contended render (twice the wall clock) must not slow the
+        # device's speed estimate.
+        perfstats.record("kitten", "m", chars=20, render_s=0.4, audio_s=1.0)
+        assert perfstats.estimate_marginal("kitten", "m") == before
+        perfstats.record("kitten", "m", chars=20, render_s=0.4, audio_s=1.0,
+                         solo=True)
+        assert perfstats.estimate_marginal("kitten", "m") > before

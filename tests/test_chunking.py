@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 
 from marmalade_tts.chunking import (
-    chunk_text, concat_wavs, pad_wav_end, ph_pack, ph_sentence_runs,
-    ph_stream_plan, resolve_max_chars,
+    band_for_rtf, chunk_text, concat_wavs, pad_wav_end, ph_pack,
+    ph_sentence_runs, ph_stream_plan, resolve_max_chars,
 )
 
 
@@ -484,3 +484,54 @@ class TestPadWavEnd:
         pad_wav_end(p, 0)
         with wave.open(p, "rb") as w:
             assert w.getnframes() == 24000
+
+
+# ── RTF bands ────────────────────────────────────────────────────────────────
+
+
+class TestBandForRtf:
+    def test_no_measurement_yet_is_optimistic(self):
+        assert band_for_rtf(None).name == "fast"
+
+    def test_bands_step_with_measured_rtf(self):
+        assert band_for_rtf(0.09).name == "fast"
+        assert band_for_rtf(0.25).name == "moderate"
+        assert band_for_rtf(0.55).name == "slow"
+
+    def test_slow_devices_drop_context_but_keep_lookahead(self):
+        # Context is three quarters of the conditioning cost; lookahead is
+        # what keeps a chunk's last word intelligible, so it stays.
+        slow = band_for_rtf(0.55)
+        assert slow.context_words == 0 and slow.lookahead_words == 2
+        fast = band_for_rtf(0.09)
+        assert fast.context_words == 4 and fast.lookahead_words == 2
+
+    def test_first_chunk_shrinks_as_the_device_slows(self):
+        assert band_for_rtf(0.25).ramp[0] < band_for_rtf(0.09).ramp[0]
+
+    def test_hysteresis_holds_the_current_band_near_an_edge(self):
+        # 0.16 is over the fast band's 0.15 edge but inside the margin.
+        assert band_for_rtf(0.16, current="fast").name == "fast"
+        assert band_for_rtf(0.20, current="fast").name == "moderate"
+
+    def test_hysteresis_applies_coming_back_down(self):
+        assert band_for_rtf(0.14, current="moderate").name == "moderate"
+        assert band_for_rtf(0.12, current="moderate").name == "fast"
+
+    def test_unknown_stored_band_is_ignored(self):
+        assert band_for_rtf(0.09, current="turbo").name == "fast"
+
+
+class TestPlanUsesTheBand:
+    def test_band_ramp_sizes_the_chunks(self):
+        ph = " ".join(["wˈʌnwˈʌn"] * 60) + "."
+        fast = ph_stream_plan(ph, 500, band=band_for_rtf(0.09))
+        moderate = ph_stream_plan(ph, 500, band=band_for_rtf(0.25))
+        assert len(moderate[0].text) < len(fast[0].text)
+
+    def test_slow_band_plans_lookahead_only(self):
+        ph = " ".join(["wˈʌnwˈʌn"] * 60) + "."
+        plan = ph_stream_plan(ph, 500, band=band_for_rtf(0.55))
+        assert all(p.context is None for p in plan)
+        assert plan[0].lookahead is not None
+        assert len(plan) > 1  # still chunked — only the context is gone
