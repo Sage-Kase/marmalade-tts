@@ -86,10 +86,24 @@ def _materialize_voices(onnx_model):
 #     the ~700-800ms of dead air at every chunk-stream seam (and fix the
 #     wrapper's blind [:-5000] trim, which clips ~200ms of real speech on
 #     punctuation-less chunks);
-#   * cut a rendered continuation prefix ("context") at the space token
-#     nearest its end, so a chunk can be conditioned on the previous
-#     chunk's tail words yet emit only its own audio. Cutting at a space
-#     token means an off-by-one lands in an inter-word gap, not in speech.
+#   * cut a rendered continuation prefix ("context") sample-exactly at the
+#     word gap that closes it, so a chunk can be conditioned on the previous
+#     chunk's tail words yet emit only its own audio;
+#   * cut a rendered continuation suffix ("lookahead") the same way from the
+#     other end, so a chunk can be conditioned on the NEXT chunk's opening
+#     words — its last word then carries natural coarticulation into a real
+#     rendered pause instead of end-of-utterance decay. Cut positions are
+#     found by counting words: espeak's IPA output separates words with the
+#     same spaces as the input text, so the boundary is exactly the Nth
+#     space token (counting the phonemized snippet's own words keeps number
+#     expansion like "42" → "forty two" consistent). The earlier
+#     phoneme-count-and-snap approach could land one gap off and clip a
+#     short word ("the horn" → "horn").
+#     NOTE: kittentts splits its input on [.!?] into independent renders, so
+#     conditioning cannot cross a sentence boundary — a lookahead after a
+#     sentence end comes back as its own run, contributes nothing, and is
+#     dropped. Clause seams (';' ':' and the dialogue comma) get the full
+#     effect.
 # We capture (input_ids, waveform, duration) by proxying session.run rather
 # than re-implementing tokenization/speed-priors — generate() still does
 # all of that; we just rebuild the audio from the raw outputs.
@@ -109,6 +123,15 @@ _letters_ipa = ("ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥ�
 VOCAB = {s: i for i, s in enumerate(
     [_pad] + list(_punctuation) + list(_letters) + list(_letters_ipa))}
 SPACE_ID = VOCAB[" "]
+_PUNCT_SET = set(_punctuation)
+
+
+def _speech_word_count(ph: str) -> int:
+    """Space-separated groups of a phonemized string that contain speech
+    (espeak sometimes spaces punctuation out as its own 'word')."""
+    return sum(1 for w in ph.split() if any(c not in _PUNCT_SET for c in w))
+
+
 
 
 class _CaptureSession:
@@ -145,15 +168,42 @@ def _cum_samples(dur) -> list:
     return out
 
 
-def _context_cut(ids, dur, n_context_phonemes: int) -> int:
-    """Sample offset where the context prefix ends: the space token nearest
-    to (BOS + n_context_phonemes), cut at that token's end."""
-    target = 1 + n_context_phonemes
-    spaces = [i for i, t in enumerate(ids) if t == SPACE_ID]
-    if not spaces:
+def _speech_onsets(ids) -> list:
+    """Token indices where speech groups begin. A group is a run of speech
+    tokens; punctuation neither opens nor splits one, so trailing puncts
+    and their pauses ride with the word they follow."""
+    onsets, in_group = [], False
+    for i, t in enumerate(ids):
+        if t > SPACE_ID:
+            if not in_group:
+                onsets.append(i)
+            in_group = True
+        elif t == 0 or t == SPACE_ID:
+            in_group = False
+    return onsets
+
+
+def _context_cut(ids, dur, n_context_words: int) -> int:
+    """Sample offset where the context prefix ends: the onset of the first
+    speech group past the context's words. Everything non-speech at the
+    boundary (punctuation pause + word gap) stays on the discarded side,
+    so the chunk opens exactly at its first word."""
+    onsets = _speech_onsets(ids)
+    if len(onsets) <= n_context_words:
         return 0
-    idx = min(spaces, key=lambda i: abs(i - target))
-    return _cum_samples(dur)[idx + 1]
+    return _cum_samples(dur)[onsets[n_context_words]]
+
+
+def _lookahead_cut(ids, dur, n_lookahead_words: int):
+    """Sample offset where the kept audio ends: the onset of the lookahead's
+    first speech group — the chunk keeps its own rendered punctuation pause
+    and word gap, so its last word coarticulates into a real pause instead
+    of end-of-utterance decay. None → run has no text of its own (caller
+    falls back to the tail-pad trim)."""
+    onsets = _speech_onsets(ids)
+    if len(onsets) <= n_lookahead_words:
+        return None
+    return _cum_samples(dur)[onsets[-n_lookahead_words]]
 
 
 def _tail_silence_frames(ids, dur) -> int:
@@ -169,19 +219,25 @@ def _tail_silence_frames(ids, dur) -> int:
     return frames
 
 
-def _trim_run(ids, wav, dur, n_context_phonemes: int = 0):
+def _trim_run(ids, wav, dur, n_context_words: int = 0,
+              n_lookahead_words: int = 0):
     """Return the speech-bearing slice of one raw (flat) run: context
-    prefix (if any) cut at a word gap, lead/tail non-speech reduced to
-    small margins. Pure sequence ops — unit-tested without the model."""
+    prefix / lookahead suffix (if any) cut at their word gaps, lead/tail
+    non-speech reduced to small margins. Pure sequence ops — unit-tested
+    without the model."""
     total = _cum_samples(dur)
     if len(wav) != total[-1]:  # duration contract broken; don't touch it
         return wav
-    if n_context_phonemes > 0:
-        start = _context_cut(ids, dur, n_context_phonemes)
+    if n_context_words > 0:
+        start = _context_cut(ids, dur, n_context_words)
     else:
         start = max(0, (int(dur[0]) - HEAD_KEEP)) * FRAME
-    tail_pad = max(0, _tail_silence_frames(ids, dur) - TAIL_KEEP) * FRAME
-    end = len(wav) - tail_pad
+    end = None
+    if n_lookahead_words > 0:
+        end = _lookahead_cut(ids, dur, n_lookahead_words)
+    if end is None:
+        tail_pad = max(0, _tail_silence_frames(ids, dur) - TAIL_KEEP) * FRAME
+        end = len(wav) - tail_pad
     return wav[start:end] if start < end else wav
 
 
@@ -196,17 +252,25 @@ def _synth_direct(model, om, req) -> bool:
         return False
     text = req["text"]
     context = (req.get("context") or "").strip()
-    full = (context + " " + text) if context else text
+    lookahead = (req.get("lookahead") or "").strip()
 
-    n_ctx = 0
-    if context:
+    n_ctx = n_la = 0
+    if context or lookahead:
         backend = getattr(om, "phonemizer", None)
         if backend is None:
             return False
-        ph = backend.phonemize([context])[0]
-        n_ctx = sum(1 for c in ph if c in VOCAB)
-        if n_ctx == 0:
-            context, full = "", text
+        # Word counts come from the phonemized snippet, not the raw text,
+        # so espeak expansions ("42" → two words) stay consistent with the
+        # full render's token stream.
+        if context:
+            n_ctx = _speech_word_count(backend.phonemize([context])[0])
+            if n_ctx == 0:
+                context = ""
+        if lookahead:
+            n_la = _speech_word_count(backend.phonemize([lookahead])[0])
+            if n_la == 0:
+                lookahead = ""
+    full = " ".join(s for s in (context, text, lookahead) if s)
 
     cap.begin()
     try:
@@ -228,15 +292,31 @@ def _synth_direct(model, om, req) -> bool:
     if not runs or any(r[0] is None for r in runs):
         return False
 
+    # kittentts splits on [.!?], so conditioning never crosses a sentence
+    # boundary: a context ending in one comes back as its own leading run
+    # (or several) and a lookahead past one as its own trailing run — they
+    # conditioned nothing, so drop them whole instead of rendering them.
+    while n_ctx and len(runs) > 1:
+        run_words = len(_speech_onsets(runs[0][0]))
+        if run_words > n_ctx:
+            break
+        runs = runs[1:]
+        n_ctx -= run_words
+    if n_la and len(runs) > 1 and len(_speech_onsets(runs[-1][0])) <= n_la:
+        runs = runs[:-1]
+        n_la = 0
+
     gap = np.zeros(int(SAMPLE_RATE * RUN_GAP_MS / 1000), dtype=np.float32)
     pieces = []
     for i, (ids, wav, dur) in enumerate(runs):
         if pieces:
             pieces.append(gap)
-        # Only the first run contains the context prefix.
+        # Only the first run contains the context prefix; only the last
+        # contains the lookahead suffix.
         pieces.append(_trim_run(ids, np.asarray(wav).reshape(-1),
                                 np.asarray(dur).ravel(),
-                                n_ctx if i == 0 else 0))
+                                n_ctx if i == 0 else 0,
+                                n_la if i == len(runs) - 1 else 0))
     sf.write(req["out"], np.concatenate(pieces), SAMPLE_RATE)
     return True
 
