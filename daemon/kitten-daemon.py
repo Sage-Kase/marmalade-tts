@@ -268,6 +268,86 @@ def _trim_run(ids, wav, dur, n_context_phonemes: int = 0,
     return wav[start:end] if start < end else wav
 
 
+# ── Phoneme-direct path (Max's two-phase idea, 2026-07-29) ──────────────────
+# The client phonemizes the WHOLE utterance once (op=phonemize below, a few
+# ms even for paragraphs) and cuts it in phoneme space, so context/text/
+# lookahead arrive as exact substrings of one consistent espeak output —
+# fusion, sandhi and standalone-vs-context drift can't shift a cut, and the
+# boundaries are exact token counts rather than counted-and-snapped guesses.
+# Bypassing kittentts's generate() also skips its [.!?] splitter: windows
+# may cross sentence boundaries (conditioning finally works at sentence-end
+# seams) and the model sees real sentence-final punctuation for the first
+# time (the wrapper strips .!? and substitutes commas).
+
+_TOKEN_RE = re.compile(r"\w+|[^\w\s]")
+
+
+def _ph_tokens(ph: str) -> list:
+    """The wrapper's exact phoneme→token pipeline: split words/punctuation,
+    rejoin with single spaces, map chars through the vocab (unknowns
+    dropped). Mirrors basic_english_tokenize + TextCleaner."""
+    return [VOCAB[c] for c in " ".join(_TOKEN_RE.findall(ph)) if c in VOCAB]
+
+
+def _ph_request_ids(ctx: str, text: str, la: str):
+    """(ids, i_text, i_la): full token stream BOS..EOS plus the exact token
+    index where the text begins and where the lookahead begins (None
+    without lookahead). Parts are joined by single space tokens, exactly
+    as one flat phonemization would."""
+    ids, i_text, i_la = [0], 1, None
+    if ctx:
+        ids += _ph_tokens(ctx)
+        ids.append(SPACE_ID)
+        i_text = len(ids)
+    ids += _ph_tokens(text)
+    if la:
+        ids.append(SPACE_ID)
+        i_la = len(ids)
+        ids += _ph_tokens(la)
+    ids += [10, 0]  # wrapper quirk: ellipsis token, then EOS pad
+    return ids, i_text, i_la
+
+
+def _synth_phonemes(om, req):
+    """Exact-cut synthesis from pre-phonemized input. Same boundary policy
+    as the text path — head cuts back off one frame into the gap, tail
+    cuts stop before the boundary space — but at known indices."""
+    import numpy as np
+    import soundfile as sf
+
+    ids, i_text, i_la = _ph_request_ids(
+        (req.get("ph_context") or "").strip(),
+        req["ph_text"].strip(),
+        (req.get("ph_lookahead") or "").strip())
+
+    voice = req.get("voice", "Kiki")
+    voice = om.voice_aliases.get(voice, voice)
+    speed = float(req.get("speed", 1.0)) * om.speed_priors.get(voice, 1.0)
+    ref_id = min(len(req["ph_text"]), om.voices[voice].shape[0] - 1)
+
+    out = om.session.run(None, {
+        "input_ids": np.array([ids], dtype=np.int64),
+        "style": om.voices[voice][ref_id:ref_id + 1],
+        "speed": np.array([speed], dtype=np.float32),
+    })
+    wav = np.asarray(out[0]).reshape(-1)
+    dur = np.asarray(out[1]).ravel()
+    cum = _cum_samples(dur)
+    if len(wav) != cum[-1]:
+        raise RuntimeError("duration contract broken on phoneme path")
+
+    if i_text > 1:
+        start = max(0, cum[i_text] - FRAME)
+    else:
+        start = max(0, (int(dur[0]) - HEAD_KEEP)) * FRAME
+    if i_la is not None:
+        end = cum[i_la - 1]  # before the boundary space
+    else:
+        end = len(wav) - max(0, _tail_silence_frames(ids, dur)
+                             - TAIL_KEEP) * FRAME
+    sf.write(req["out"], wav[start:end] if start < end else wav, SAMPLE_RATE)
+
+
 def _synth_direct(model, om, req) -> bool:
     """Duration-trimmed synthesis via output capture. False → caller falls
     back to plain generate_to_file (kittentts internals moved)."""
@@ -362,6 +442,22 @@ def load_model():
 def synth(model, req):
     want = req.get("model")
     check_loaded("kitten", MODEL_REPOS.get(want, want), MODEL_REPO)
+    if req.get("op") == "phonemize":
+        # Phase 1 of the phoneme-direct path: espeak the whole utterance
+        # once (~2ms/paragraph) with the same preprocessor + fixups the
+        # text path uses; result written as a text file to req["out"].
+        om = model.model
+        text = req["text"]
+        pre = getattr(om, "preprocessor", None)
+        if pre is not None:
+            text = pre(text)
+        ph = om.phonemizer.phonemize([text])[0]
+        with open(req["out"], "w", encoding="utf-8") as f:
+            f.write(ph)
+        return
+    if "ph_text" in req:
+        _synth_phonemes(model.model, req)  # no text fallback: exact or error
+        return
     try:
         if _synth_direct(model, model.model, req):
             return

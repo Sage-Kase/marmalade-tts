@@ -179,6 +179,35 @@ def test_speech_phoneme_count_ignores_punct_and_space():
     assert kitten_daemon._speech_phoneme_count("ðə bˈeɪ; ") == 6
 
 
+# ── Phoneme-direct path helpers ─────────────────────────────────────────────
+
+V = kitten_daemon.VOCAB
+
+
+def test_ph_tokens_matches_wrapper_pipeline():
+    # Punctuation splits into its own space-joined token, exactly like
+    # basic_english_tokenize + TextCleaner: "bɪlˈoʊ:" → "bɪlˈoʊ :".
+    assert kitten_daemon._ph_tokens("bɪlˈoʊ:") == \
+        [V[c] for c in "bɪlˈoʊ :"]
+    # Unknown characters are dropped, words joined by single spaces.
+    assert kitten_daemon._ph_tokens("ðə  bˈeɪ") == [V[c] for c in "ðə bˈeɪ"]
+
+
+def test_ph_request_ids_boundaries_exact():
+    ids, i_text, i_la = kitten_daemon._ph_request_ids("ðə", "bˈeɪ", "ænd")
+    ctx, text, la = ([V[c] for c in s] for s in ("ðə", "bˈeɪ", "ænd"))
+    assert ids == [0] + ctx + [SPACE] + text + [SPACE] + la + [10, 0]
+    assert ids[i_text:i_text + len(text)] == text
+    assert ids[i_la:i_la + len(la)] == la
+    assert ids[i_la - 1] == SPACE
+
+
+def test_ph_request_ids_no_conditioning():
+    ids, i_text, i_la = kitten_daemon._ph_request_ids("", "bˈeɪ", "")
+    assert ids == [0] + [V[c] for c in "bˈeɪ"] + [10, 0]
+    assert i_text == 1 and i_la is None
+
+
 def test_trim_lookahead_fallback_to_tail_pad():
     # No text of its own → no lookahead cut; normal tail-pad trim applies.
     ids = [0, 30, 31, 0]
