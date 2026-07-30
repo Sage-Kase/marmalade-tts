@@ -8,7 +8,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 
 from marmalade_tts.chunking import (
-    chunk_text, concat_wavs, resolve_max_chars,
+    chunk_text, concat_wavs, pad_wav_end, ph_pack, ph_sentence_runs,
+    ph_stream_plan, resolve_max_chars,
 )
 
 
@@ -358,3 +359,128 @@ class TestSynthesizeOneChunking:
         )
 
         assert engine.synthesize.call_count >= 2
+
+
+# ── phoneme-space streaming plan ─────────────────────────────────────────────
+
+# Real espeak output from the kitten daemon (en-us, 2026-07-30).
+PH_DIALOGUE = ('"wˌɛɹ dˈɪd juː pˌʊt ðə kˈiːz?" ʃiː ˈæskt. '
+               '"ɔnðə hˈʊk," hiː sˈɛd.')
+PH_COLON = 'nˈaʊ lˈʊk æt ðə pˈænəl: ɪz ðə ɹˈɛd lˈaɪt stˈɪl blˈɪŋkɪŋ? ɡˈʊd.'
+
+
+class TestPhSentenceRuns:
+    def test_terminal_marks_become_commas(self):
+        assert (ph_sentence_runs("wˈʌn. tˈuː? θɹˈiː!")
+                == ["wˈʌn,", "tˈuː,", "θɹˈiː,"])
+
+    def test_closing_quote_stays_with_its_sentence(self):
+        # The text path split INSIDE the quotation and destroyed the '?';
+        # splitting on the mark itself keeps '?" she asked' together.
+        runs = ph_sentence_runs(PH_DIALOGUE)
+        assert len(runs) == 2
+        assert runs[0].startswith('"wˌɛɹ') and 'ˈæskt,' in runs[0]
+        assert 'kˈiːz?"' in runs[0]
+
+    def test_swap_happens_inside_a_closing_quote(self):
+        assert ph_sentence_runs('hˈɛloʊ."') == ['hˈɛloʊ,"']
+
+    def test_keep_marks_leaves_that_mark_alone(self):
+        runs = ph_sentence_runs("wˈʌn. tˈuː! θɹˈiː?", keep_marks="!")
+        assert runs == ["wˈʌn,", "tˈuː!", "θɹˈiː,"]
+
+    def test_intra_sentence_marks_untouched(self):
+        assert ph_sentence_runs(PH_COLON)[0].count(":") == 1
+
+
+class TestPhPack:
+    def test_short_run_is_one_piece(self):
+        assert ph_pack("wˈʌn tˈuː θɹˈiː,", max_chars=500) == ["wˈʌn tˈuː θɹˈiː,"]
+
+    def test_long_run_follows_the_ramp(self):
+        run = " ".join(["wˈʌnwˈʌn"] * 60)  # 8-char words, no clause marks
+        pieces = ph_pack(run, max_chars=500)
+        assert len(pieces) > 3
+        assert len(pieces[0]) <= 60 and len(pieces[1]) <= 100
+        assert " ".join(pieces).split() == run.split()
+
+    def test_max_chars_caps_the_ramp(self):
+        run = " ".join(["wˈʌnwˈʌn"] * 60)
+        assert all(len(p) <= 40 for p in ph_pack(run, max_chars=40))
+
+    def test_closes_on_a_clause_mark_near_target(self):
+        run = ("wˈʌnwˈʌn wˈʌnwˈʌn wˈʌnwˈʌn wˈʌnwˈʌn wˈʌnwˈʌn, "
+               "tˈuːtˈuː tˈuːtˈuː tˈuːtˈuː tˈuːtˈuː tˈuːtˈuː,")
+        assert ph_pack(run, max_chars=500)[0].endswith(",")
+
+    def test_clause_mark_before_a_quote_is_not_a_boundary(self):
+        # The dialogue comma before a quotation was the one seam Max
+        # singled out as audible (2026-07-29).
+        run = 'wˈʌnwˈʌn ' * 5 + 'sˈɛd, {}hˈɛloʊ,'
+        # Same run, same lengths: a comma before a plain word closes the
+        # chunk; the same comma before an opening quote does not.
+        assert len(ph_pack(run.format(""), max_chars=500)) == 2
+        assert len(ph_pack(run.format('"'), max_chars=500)) == 1
+
+
+class TestPhStreamPlan:
+    def test_one_piece_per_run_when_runs_are_short(self):
+        plan = ph_stream_plan(PH_DIALOGUE, max_chars=500)
+        assert len(plan) == 2
+        assert [p.text for p in plan] == ph_sentence_runs(PH_DIALOGUE)
+
+    def test_gap_after_every_run_but_the_last(self):
+        plan = ph_stream_plan(PH_DIALOGUE, max_chars=500)
+        assert [p.gap_after_ms for p in plan] == [150, 0]
+
+    def test_no_conditioning_across_a_run_gap(self):
+        # J2c: conditioning across sentence gaps gives continuation prosody
+        # that contradicts the inserted silence. Max: "really bad".
+        for p in ph_stream_plan(PH_DIALOGUE, max_chars=500):
+            assert p.context is None and p.lookahead is None
+
+    def test_sub_chunks_are_conditioned_both_ways(self):
+        run = " ".join(["wˈʌnwˈʌn"] * 60) + "."
+        plan = ph_stream_plan(run, max_chars=500)
+        assert len(plan) > 2
+        assert plan[0].context is None and plan[0].lookahead is not None
+        assert plan[1].context is not None and plan[1].lookahead is not None
+        assert plan[-1].lookahead is None
+        # context/lookahead are exact substrings of the neighbouring pieces
+        assert plan[1].context == " ".join(plan[0].text.split()[-4:])
+        assert plan[0].lookahead == " ".join(plan[1].text.split()[:2])
+
+    def test_only_the_run_final_piece_carries_the_gap(self):
+        ph = " ".join(["wˈʌnwˈʌn"] * 40) + ". " + " ".join(["tˈuːtˈuː"] * 10)
+        plan = ph_stream_plan(ph, max_chars=500)
+        gaps = [i for i, p in enumerate(plan) if p.gap_after_ms]
+        assert len(gaps) == 1
+        assert plan[gaps[0] + 1].context is None  # next run starts fresh
+
+    def test_ramp_continues_across_runs(self):
+        # Chunk sizes are about time-to-first-audio, so the ramp counts
+        # pieces emitted so far — it does not restart at every sentence.
+        ph = ". ".join(" ".join(["wˈʌnwˈʌn"] * 30) for _ in range(3))
+        plan = ph_stream_plan(ph, max_chars=500)
+        assert len(plan[0].text) <= 60
+        assert len(plan[-1].text) > 60
+
+    def test_empty_input_plans_nothing(self):
+        assert ph_stream_plan("   ", max_chars=500) == []
+
+
+class TestPadWavEnd:
+    def test_appends_exact_silence(self, tmp_path):
+        p = str(tmp_path / "a.wav")
+        _silent_wav(p, 1.0, rate=24000)
+        pad_wav_end(p, 150)
+        with wave.open(p, "rb") as w:
+            assert w.getnframes() == 24000 + 3600
+            assert w.getframerate() == 24000
+
+    def test_zero_is_a_noop(self, tmp_path):
+        p = str(tmp_path / "a.wav")
+        _silent_wav(p, 1.0, rate=24000)
+        pad_wav_end(p, 0)
+        with wave.open(p, "rb") as w:
+            assert w.getnframes() == 24000

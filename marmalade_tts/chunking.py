@@ -161,6 +161,156 @@ def chunk_for_streaming(text: str, max_chars: int) -> list[str]:
     return out
 
 
+# ── Phoneme-space streaming plan ────────────────────────────────────────────
+# The kitten daemon can phonemize a whole utterance in one espeak call
+# (~2ms for a paragraph) and synthesize from phonemes directly. Planning the
+# stream in phoneme space instead of text space is strictly better, and the
+# 2026-07-29/30 listening rounds decided every part of it:
+#
+#   * Cuts are exact substrings of ONE espeak output, so espeak's
+#     context-dependent fusion ("from the" → "fɹʌmðə") can't shift a
+#     boundary — the text path had to count phonemes and snap to word
+#     onsets, and still only approximated it.
+#   * Sentence runs split on the mark itself, so closing quotes stay with
+#     their sentence. The text path split inside quotations ('"Where did
+#     you put the keys,' + '" she asked,') and destroyed the question —
+#     this is why the phoneme pipeline beat the wrapper outright on
+#     dialogue (P9) and instructions (P10).
+#   * Terminal .!? are swapped for a comma AFTER espeak has seen the real
+#     marks, so the model gets sentence-final phonology with the wrapper's
+#     pausing (which Max preferred to continuous real-mark rendering).
+#   * Runs are joined by a uniform 150ms gap. Mark-proportional gaps
+#     (J2g) gave no audible win.
+#   * Conditioning (context/lookahead) applies ONLY inside a sentence run.
+#     Across a run gap it gives continuation prosody that contradicts the
+#     inserted silence — Max's "really bad" verdict on J2c.
+
+_PH_SENTENCE = re.compile(r"(?<=[.!?])(?=\s)")
+_PH_TERMINAL_MARK = re.compile(r"([.!?])[\"”']*$")
+_PH_TERMINAL = re.compile(r"[.!?]+(?=[\"”']*$)")
+
+RUN_GAP_MS = 150      # silence between sentence runs
+CONTEXT_WORDS = 4     # conditioning prefix, cut away after rendering
+LOOKAHEAD_WORDS = 2   # conditioning suffix (i5)
+
+# A chunk may end early on a clause mark once it is at least this fraction
+# of the size target — clause ends are the nicest seams, but never at the
+# cost of a chunk far below target (which would cost render overhead).
+_CLAUSE_CLOSE_AT = 0.75
+
+
+class PhPiece:
+    """One rendered unit of a phoneme-space stream plan."""
+
+    __slots__ = ("text", "context", "lookahead", "gap_after_ms")
+
+    def __init__(self, text, context=None, lookahead=None, gap_after_ms=0):
+        self.text = text
+        self.context = context
+        self.lookahead = lookahead
+        self.gap_after_ms = gap_after_ms
+
+    def __eq__(self, other):
+        return (isinstance(other, PhPiece)
+                and (self.text, self.context, self.lookahead,
+                     self.gap_after_ms)
+                == (other.text, other.context, other.lookahead,
+                    other.gap_after_ms))
+
+    def __repr__(self):
+        return (f"PhPiece({self.text!r}, {self.context!r}, "
+                f"{self.lookahead!r}, {self.gap_after_ms})")
+
+
+def ph_sentence_runs(ph: str, keep_marks: str = "") -> list[str]:
+    """Split a phonemized utterance into sentence runs, swapping each run's
+    terminal .!? for a comma. Marks listed in ``keep_marks`` are left alone
+    (the model does render them — measured pauses period 225ms · ! 146 ·
+    ? 114 — it is the wrapper that substitutes commas)."""
+    runs: list[str] = []
+    for run in _PH_SENTENCE.split(ph):
+        run = run.strip()
+        if not run:
+            continue
+        m = _PH_TERMINAL_MARK.search(run)
+        if not (m and m.group(1) in keep_marks):
+            run = _PH_TERMINAL.sub(",", run)
+        runs.append(run)
+    return runs
+
+
+def _ends_clause(word: str, next_word: str | None) -> bool:
+    """True if ``word`` closes a clause we may cut after. A clause mark
+    followed by an opening quote is not a boundary — the dialogue comma
+    before a quotation was the one seam Max singled out as audible."""
+    if not word or word[-1] not in ";:,":
+        return False
+    return not (next_word and next_word[0] in '"“\'')
+
+
+def ph_pack(run: str, max_chars: int, step: int = 0,
+            ramp: "tuple[int, ...]" = _STREAM_RAMP) -> list[str]:
+    """Pack one sentence run into ramp-sized sub-chunks at word gaps,
+    closing on a clause mark when one lands near the target.
+
+    Word-gap cuts inside a sentence were rejected in round 1 and accepted
+    in round 7 once seams were trimmed and conditioned both ways (C2/D2) —
+    chunk size is a performance knob now, not a quality one.
+    """
+    words = run.split()
+    out: list[str] = []
+    cur = ""
+    for i, w in enumerate(words):
+        target = min(ramp[min(step + len(out), len(ramp) - 1)], max_chars)
+        cand = (cur + " " + w) if cur else w
+        if cur and len(cand) > target:
+            out.append(cur)
+            cur = w
+            continue
+        cur = cand
+        if (len(cur) >= _CLAUSE_CLOSE_AT * target
+                and _ends_clause(w, words[i + 1] if i + 1 < len(words) else None)):
+            out.append(cur)
+            cur = ""
+    if cur:
+        out.append(cur)
+    return out or [run]
+
+
+def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
+                   gap_ms: int = RUN_GAP_MS) -> list[PhPiece]:
+    """The full streaming plan for one phonemized utterance."""
+    runs = ph_sentence_runs(ph, keep_marks)
+    pieces: list[PhPiece] = []
+    for ri, run in enumerate(runs):
+        subs = ph_pack(run, max_chars, step=len(pieces))
+        last_run = ri == len(runs) - 1
+        for i, s in enumerate(subs):
+            last_sub = i == len(subs) - 1
+            pieces.append(PhPiece(
+                s,
+                " ".join(subs[i - 1].split()[-CONTEXT_WORDS:]) if i else None,
+                (" ".join(subs[i + 1].split()[:LOOKAHEAD_WORDS])
+                 if not last_sub else None),
+                gap_ms if last_sub and not last_run else 0,
+            ))
+    return pieces
+
+
+def pad_wav_end(path: str, ms: int) -> None:
+    """Append ``ms`` of silence to a WAV in place (the inter-run gap)."""
+    if ms <= 0:
+        return
+    with wave.open(path, "rb") as src:
+        params = src.getparams()
+        frames = src.readframes(src.getnframes())
+    n = int(params.framerate * ms / 1000)
+    with wave.open(path, "wb") as dst:
+        dst.setparams(params)
+        dst.writeframes(frames)
+        dst.writeframes(b"\0" * (n * params.sampwidth * params.nchannels))
+
+
 def concat_wavs(in_paths: list[str], out_path: str) -> None:
     """Concatenate WAVs end-to-end into ``out_path``.
 
