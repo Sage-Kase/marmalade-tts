@@ -498,13 +498,12 @@ class TestBandForRtf:
         assert band_for_rtf(0.25).name == "moderate"
         assert band_for_rtf(0.55).name == "slow"
 
-    def test_slow_devices_drop_context_but_keep_lookahead(self):
-        # Context is three quarters of the conditioning cost; lookahead is
-        # what keeps a chunk's last word intelligible, so it stays.
-        slow = band_for_rtf(0.55)
-        assert slow.context_words == 0 and slow.lookahead_words == 2
-        fast = band_for_rtf(0.09)
-        assert fast.context_words == 4 and fast.lookahead_words == 2
+    def test_every_band_conditions_its_seams(self):
+        # Seam conditioning is quality, not a budget line: slow devices
+        # get bigger chunks, never worse seams.
+        for rtf in (0.09, 0.25, 0.55, 2.0):
+            band = band_for_rtf(rtf)
+            assert band.context_units == 4 and band.lookahead_units == 2
 
     def test_first_chunk_shrinks_as_the_device_slows(self):
         assert band_for_rtf(0.25).ramp[0] < band_for_rtf(0.09).ramp[0]
@@ -529,9 +528,9 @@ class TestPlanUsesTheBand:
         moderate = ph_stream_plan(ph, 500, band=band_for_rtf(0.25))
         assert len(moderate[0].text) < len(fast[0].text)
 
-    def test_slow_band_plans_lookahead_only(self):
+    def test_slow_band_uses_bigger_chunks(self):
         ph = " ".join(["wˈʌnwˈʌn"] * 60) + "."
-        plan = ph_stream_plan(ph, 500, band=band_for_rtf(0.55))
-        assert all(p.context is None for p in plan)
-        assert plan[0].lookahead is not None
-        assert len(plan) > 1  # still chunked — only the context is gone
+        slow = ph_stream_plan(ph, 500, band=band_for_rtf(0.55))
+        moderate = ph_stream_plan(ph, 500, band=band_for_rtf(0.25))
+        assert len(slow[0].text) > len(moderate[0].text)
+        assert all(p.context is not None for p in slow[1:])

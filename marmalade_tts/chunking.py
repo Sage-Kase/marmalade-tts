@@ -190,8 +190,15 @@ _PH_TERMINAL_MARK = re.compile(r"([.!?])[\"”']*$")
 _PH_TERMINAL = re.compile(r"[.!?]+(?=[\"”']*$)")
 
 RUN_GAP_MS = 150      # silence between sentence runs
-CONTEXT_WORDS = 4     # conditioning prefix, cut away after rendering
-LOOKAHEAD_WORDS = 2   # conditioning suffix (i5)
+
+# Conditioning depth, counted in ESPEAK'S OWN ATOMIC UNITS — the
+# whitespace-separated tokens of the phoneme string — not in English
+# words. espeak fuses function words with their neighbours ("from the" →
+# "fɹʌmðə", one unit), so a unit is what the model actually treats as a
+# word, and slicing the phoneme string is exact by construction. On the
+# legacy text path these are English words and only approximately this.
+CONTEXT_UNITS = 4     # conditioning prefix, cut away after rendering
+LOOKAHEAD_UNITS = 2   # conditioning suffix (i5)
 
 # A chunk may end early on a clause mark once it is at least this fraction
 # of the size target — clause ends are the nicest seams, but never at the
@@ -228,20 +235,18 @@ _CLAUSE_CLOSE_AT = 0.75
 #   fast (≤0.15)     conditioning is nearly free — keep the full ramp.
 #   moderate (≤0.35) conditioning still fits under the ceiling, but the
 #                    first chunk must shrink to hold TTFA under ~0.8s.
-#   slow (>0.35)     full conditioning no longer fits: 2s of discarded
-#                    audio per chunk would need ~4s chunks to stay under
-#                    the ceiling, i.e. multi-second TTFA. The 4 context
-#                    words go (they are three quarters of the cost); the
-#                    2 lookahead words stay, because dropping BOTH costs
-#                    word clarity at chunk tails — with no lookahead the
-#                    last word ends in utterance decay instead of
-#                    coarticulating, and faster-whisper stopped hearing
-#                    a chunk-final "the" on the P6 seam (2026-07-30).
+#   slow (>0.35)     chunks grow to amortize the conditioning, and the
+#                    playback gate buffers more. Conditioning itself is
+#                    NOT dropped: it is the quality of the seams, and
+#                    trading it away to make a number fit was not a
+#                    decision anyone signed off (Max, 2026-07-30). The
+#                    real lever is how deep conditioning has to be —
+#                    see CONTEXT_UNITS.
 _STREAM_BANDS = (
-    # (name, upper marginal-RTF bound, ramp, context words, lookahead words)
-    ("fast", 0.15, (60, 100, 160, 250, 400), CONTEXT_WORDS, LOOKAHEAD_WORDS),
-    ("moderate", 0.35, (30, 60, 120, 220, 400), CONTEXT_WORDS, LOOKAHEAD_WORDS),
-    ("slow", float("inf"), (40, 90, 180, 320, 400), 0, LOOKAHEAD_WORDS),
+    # (name, upper marginal-RTF bound, ramp, context units, lookahead units)
+    ("fast", 0.15, (60, 100, 160, 250, 400), CONTEXT_UNITS, LOOKAHEAD_UNITS),
+    ("moderate", 0.35, (30, 60, 120, 220, 400), CONTEXT_UNITS, LOOKAHEAD_UNITS),
+    ("slow", float("inf"), (90, 180, 320, 400), CONTEXT_UNITS, LOOKAHEAD_UNITS),
 )
 
 # A band is only left once the estimate is this far past its edge.
@@ -249,13 +254,13 @@ BAND_HYSTERESIS = 0.15
 
 
 class StreamBand:
-    __slots__ = ("name", "ramp", "context_words", "lookahead_words")
+    __slots__ = ("name", "ramp", "context_units", "lookahead_units")
 
-    def __init__(self, name, ramp, context_words, lookahead_words):
+    def __init__(self, name, ramp, context_units, lookahead_units):
         self.name = name
         self.ramp = ramp
-        self.context_words = context_words
-        self.lookahead_words = lookahead_words
+        self.context_units = context_units
+        self.lookahead_units = lookahead_units
 
     def __repr__(self):
         return f"StreamBand({self.name!r}, {self.ramp!r})"
@@ -390,10 +395,10 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
         last_run = ri == len(runs) - 1
         for i, s in enumerate(subs):
             last_sub = i == len(subs) - 1
-            ctx = (" ".join(subs[i - 1].split()[-band.context_words:])
-                   if i and band.context_words else None)
-            la = (" ".join(subs[i + 1].split()[:band.lookahead_words])
-                  if not last_sub and band.lookahead_words else None)
+            ctx = (" ".join(subs[i - 1].split()[-band.context_units:])
+                   if i and band.context_units else None)
+            la = (" ".join(subs[i + 1].split()[:band.lookahead_units])
+                  if not last_sub and band.lookahead_units else None)
             pieces.append(PhPiece(
                 s, ctx, la, gap_ms if last_sub and not last_run else 0))
     return pieces

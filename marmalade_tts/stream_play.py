@@ -65,9 +65,11 @@ LOOKAHEAD_WORDS = 2
 # round decided it.
 #
 # KEEP_TERMINAL_MARKS: terminal marks NOT swapped for a comma before
-# rendering. '.' and '?' are decided (swap). '!' is under test — the swap
-# may flatten exclamation intonation (2026-07-30 lab, R12 rows).
-KEEP_TERMINAL_MARKS = ""
+# rendering. '.' and '?' are swapped (the wrapper's trick, which Max
+# preferred to continuous real-mark rendering). '!' is kept: Max's
+# 2026-07-30 A/B found the real mark sounded the same as the comma, so the
+# swap buys nothing there and the honest input wins the tie.
+KEEP_TERMINAL_MARKS = "!"
 # The model renders an intra-sentence colon in ~87ms, which reads as no
 # pause at all; topped up to a floor of inserted silence.
 PAD_MARKS = {":": 150}
