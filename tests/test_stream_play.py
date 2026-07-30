@@ -86,13 +86,15 @@ class TestChunkForStreaming:
         for c in chunk_for_streaming(text.strip(), 500):
             assert c[-1] in ".!?;:," or c[-1] in "\"'”"
 
-    def test_dialogue_comma_before_quote_is_a_boundary(self):
+    def test_dialogue_comma_before_quote_is_not_a_boundary(self):
+        # Was a boundary until Max's 2026-07-29 lab round: that seam was
+        # the one audible break in the G/H variants.
         text = ('Then the lighthouse keeper said, "The ship is coming too '
                 'close to the shoreline!" Everyone ran for the rocks below '
                 'while the horn kept sounding across the dark water.')
         chunks = chunk_for_streaming(text, 500)
-        assert chunks[0] == "Then the lighthouse keeper said,"
-        assert chunks[1].startswith('"The ship')
+        assert chunks[0] == ('Then the lighthouse keeper said, "The ship is '
+                             'coming too close to the shoreline!"')
 
     def test_semicolons_and_colons_are_boundaries(self):
         text = ("The plan was simple: leave before dawn; travel light; "

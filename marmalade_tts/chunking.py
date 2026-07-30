@@ -98,13 +98,12 @@ def _split_by_words(text: str, max_chars: int) -> list[str]:
 # Clause boundary for streaming chunks. Mid-sentence cuts sound like the
 # TTS was cut off and restarted (2026-07-28 listening lab), so streaming
 # only ever breaks at: sentence ends (incl. inside closing quotes),
-# semicolons, colons, newlines — and the dialogue-intro comma directly
-# before an opening quote ('the keeper said, "The ship..."'), where a
-# pause reads as natural. Plain commas and dashes are NOT boundaries.
+# semicolons, colons, and newlines. Commas are NOT boundaries — including
+# the dialogue-intro comma before a quote, which was one until Max's
+# 2026-07-29 lab round flagged that seam as the one audible break.
 _CLAUSE_BOUNDARY = re.compile(
     r'(?<=[.!?;:])[)"”\']?\s+'   # clause-final punct (+ closing quote)
-    r'|,\s+(?=["“])'             # comma introducing a quotation
-    r'|\s*\n+\s*'                     # explicit line breaks
+    r'|\s*\n+\s*'                # explicit line breaks
 )
 
 # Streaming chunk-size ramp: early chunks stay small so the playback gate
