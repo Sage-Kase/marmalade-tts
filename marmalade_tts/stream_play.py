@@ -28,7 +28,8 @@ chunk), never to corruption.
 Engines that advertise ``PHONEME_STREAM`` (kitten in daemon mode) plan the
 whole stream in phoneme space instead of text: one espeak call up front,
 sentence runs split on the real marks, sub-sentence chunks conditioned at
-exact token indices, uniform inter-run gaps, one pinned style row. See
+exact token indices, uniform inter-run gaps, per-run style rows (each
+sentence keeps its own length's register, sub-chunks share it). See
 ``chunking.ph_stream_plan``. Everything below the plan — the gate, the
 worker pool, perfstats — is identical either way.
 
@@ -130,13 +131,12 @@ def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict,
             perfstats.estimate_marginal(engine_name, mkey),
             perfstats.band(engine_name, mkey))
     plan = chunking.ph_stream_plan(ph, max_chars,
-                                   keep_marks=KEEP_TERMINAL_MARKS, band=band)
+                                   keep_marks=KEEP_TERMINAL_MARKS, band=band,
+                                   text=text)
     if plan and banded:
         perfstats.set_band(engine_name, mkey, band.name)
-    # One style row for the whole utterance: the length-indexed row the
-    # model would have used for a single whole render, so chunks can't
-    # drift in timbre between them (P11 — neighbouring rows are audible).
-    # The daemon clamps to the pack's row count.
+    # Pieces carry per-run style rows (stock-faithful registers — Max's
+    # R16-1 verdict); len(ph) is only the fallback for a piece without one.
     return (plan, len(ph)) if plan else (None, None)
 
 
@@ -214,9 +214,10 @@ def try_stream_single(
         kwargs = dict(synth_kwargs)
         if plan is not None:
             piece = plan[i]
+            row = piece.style_ref if piece.style_ref is not None else style_ref
             engine.synthesize_phonemes(
                 piece.text, tmp_paths[i], context=piece.context,
-                lookahead=piece.lookahead, style_ref=style_ref,
+                lookahead=piece.lookahead, style_ref=row,
                 pad_marks=PAD_MARKS, **kwargs)
         else:
             if use_context and i > 0:

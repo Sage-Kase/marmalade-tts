@@ -431,12 +431,13 @@ class TestSynthesizeOnePhonemePath:
         assert len(eng.ph_calls) == 1
         assert os.path.getsize(out) > 0
 
-    def test_one_style_row_and_pad_marks_on_every_piece(self, tmp_path):
+    def test_per_run_style_rows_and_pad_marks_on_every_piece(self, tmp_path):
         eng = _fake_ph_engine(PH_TWO_RUNS)
-        self._run(eng, tmp_path)
+        self._run(eng, tmp_path, text="One one one. Two two two two two.")
         from marmalade_tts import stream_play
+        rows = [kw["style_ref"] for _, kw in eng.ph_calls]
+        assert rows == [len("One one one."), len("Two two two two two.")]
         for _, kw in eng.ph_calls:
-            assert kw["style_ref"] == len(PH_TWO_RUNS)
             assert kw["pad_marks"] == stream_play.PAD_MARKS
 
     def test_inter_run_gap_lands_in_the_output(self, tmp_path):
@@ -564,6 +565,37 @@ class TestPhStreamPlan:
         # context/lookahead are exact substrings of the neighbouring pieces
         assert plan[1].context == " ".join(plan[0].text.split()[-2:])
         assert plan[0].lookahead == " ".join(plan[1].text.split()[:2])
+
+    def test_style_refs_none_without_text(self):
+        assert all(p.style_ref is None
+                   for p in ph_stream_plan(PH_DIALOGUE, max_chars=500))
+
+    def test_per_run_style_refs_are_text_sentence_lengths(self):
+        # Stock rule (verified in the wrapper's _prepare_inputs): the row is
+        # the sentence's TEXT char count, not its phoneme count.
+        text = ('"Where did you put the keys?" she asked. '
+                '"On the hook," he said.')
+        plan = ph_stream_plan(PH_DIALOGUE, max_chars=500, text=text)
+        assert [p.style_ref for p in plan] == [
+            len('"Where did you put the keys?" she asked.'),
+            len('"On the hook," he said.')]
+
+    def test_sub_chunks_share_their_sentence_row(self):
+        run = " ".join(["wˈʌnwˈʌn"] * 60) + "."
+        text = " ".join(["oneone"] * 60) + "."
+        plan = ph_stream_plan(run, max_chars=500, text=text)
+        assert len(plan) > 2
+        assert {p.style_ref for p in plan} == {len(text)}
+
+    def test_style_ref_fallback_scales_by_ph_ratio_on_count_mismatch(self):
+        # espeak erases the abbreviation dot ("Mr." -> mˈɪstɚ), so the text
+        # splits into more sentences than the phonemes — the pairing falls
+        # back to scaling each run's ph length by the utterance ratio.
+        ph = "mˈɪstɚ smˈɪθ wˈeɪvd."
+        text = "Mr. Smith waved."
+        plan = ph_stream_plan(ph, max_chars=500, text=text)
+        assert len(plan) == 1
+        assert plan[0].style_ref == round(len(ph) * len(text) / len(ph))
 
     def test_only_the_run_final_piece_carries_the_gap(self):
         ph = " ".join(["wˈʌnwˈʌn"] * 40) + ". " + " ".join(["tˈuːtˈuː"] * 10)

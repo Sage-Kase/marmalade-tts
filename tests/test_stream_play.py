@@ -355,13 +355,15 @@ class TestPhonemeStream:
         assert [c[0] for c in eng.ph_calls] == ["wˈʌn wˈʌn wˈʌn.",
                                                 "tˈuː tˈuː tˈuː."]
 
-    def test_one_style_row_for_the_whole_utterance(self, tmp_path):
+    def test_per_run_style_rows_from_text_sentence_lengths(self, tmp_path):
+        # Stock-faithful registers (R16-1): each sentence's row is its own
+        # TEXT length — not the utterance's, and not phoneme chars.
         eng = _fake_ph_engine(PH_TWO_RUNS)
         try_stream_single(
-            "One one one. Two two two.", str(tmp_path / "o.wav"),
+            "One one one. Two two two two two.", str(tmp_path / "o.wav"),
             engine=eng, engine_name="kitten", play=lambda p: None, **_COMMON)
-        rows = {kw["style_ref"] for _, kw in eng.ph_calls}
-        assert rows == {len(PH_TWO_RUNS)}
+        rows = [kw["style_ref"] for _, kw in eng.ph_calls]
+        assert rows == [len("One one one."), len("Two two two two two.")]
 
     def test_inter_run_gap_lands_in_the_output(self, tmp_path):
         eng = _fake_ph_engine(PH_TWO_RUNS)

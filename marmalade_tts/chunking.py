@@ -316,26 +316,35 @@ def band_for_rtf(mrtf: "float | None",
 
 
 class PhPiece:
-    """One rendered unit of a phoneme-space stream plan."""
+    """One rendered unit of a phoneme-space stream plan.
 
-    __slots__ = ("text", "context", "lookahead", "gap_after_ms")
+    ``style_ref`` is the style-pack row for this piece — the character
+    count of the sentence (run) the piece belongs to, so every sub-chunk
+    of a sentence shares its sentence's register and rows can't drift
+    mid-sentence (P11). None means the caller picks (legacy pinned row).
+    The engine clamps to its pack's row count."""
 
-    def __init__(self, text, context=None, lookahead=None, gap_after_ms=0):
+    __slots__ = ("text", "context", "lookahead", "gap_after_ms", "style_ref")
+
+    def __init__(self, text, context=None, lookahead=None, gap_after_ms=0,
+                 style_ref=None):
         self.text = text
         self.context = context
         self.lookahead = lookahead
         self.gap_after_ms = gap_after_ms
+        self.style_ref = style_ref
 
     def __eq__(self, other):
         return (isinstance(other, PhPiece)
                 and (self.text, self.context, self.lookahead,
-                     self.gap_after_ms)
+                     self.gap_after_ms, self.style_ref)
                 == (other.text, other.context, other.lookahead,
-                    other.gap_after_ms))
+                    other.gap_after_ms, other.style_ref))
 
     def __repr__(self):
         return (f"PhPiece({self.text!r}, {self.context!r}, "
-                f"{self.lookahead!r}, {self.gap_after_ms})")
+                f"{self.lookahead!r}, {self.gap_after_ms}, "
+                f"{self.style_ref})")
 
 
 def ph_sentence_runs(ph: str, keep_marks: str = "") -> list[str]:
@@ -393,13 +402,39 @@ def ph_pack(run: str, max_chars: int, step: int = 0,
     return out or [run]
 
 
+def _run_style_refs(ph: str, ph_runs: list[str], text: str) -> list[int]:
+    """Per-run style rows, stock-faithful: the upstream wrapper indexes the
+    pack by each sentence's TEXT character count (verified in
+    ``_prepare_inputs``: ``min(len(text), rows-1)`` on the text chunk —
+    phoneme chars run ~1.1× text chars, and neighbouring rows are audible,
+    P11). Its ``[.!?]+`` split drops the mark and appends a comma, so our
+    sentence-with-its-mark length equals stock's counted length.
+
+    The text is split with the same rule as the phoneme runs; when the
+    counts disagree (espeak erases abbreviation dots the text split trips
+    over), fall back to scaling each run's phoneme length by the
+    utterance-wide text/phoneme ratio — register-faithful, never crashes.
+    """
+    text_runs = [r.strip() for r in _PH_SENTENCE.split(text) if r.strip()]
+    if len(text_runs) == len(ph_runs):
+        return [len(r) for r in text_runs]
+    ratio = len(text) / len(ph) if ph else 1.0
+    return [round(len(r) * ratio) for r in ph_runs]
+
+
 def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
                    gap_ms: int = RUN_GAP_MS,
-                   band: "StreamBand | None" = None) -> list[PhPiece]:
-    """The full streaming plan for one phonemized utterance."""
+                   band: "StreamBand | None" = None,
+                   text: "str | None" = None) -> list[PhPiece]:
+    """The full streaming plan for one phonemized utterance.
+
+    ``text`` is the pre-phonemization utterance; when given, each run's
+    pieces carry the run's style row (see ``_run_style_refs``). Without it
+    ``style_ref`` stays None and the caller picks a row."""
     if band is None:
         band = band_for_rtf(None)
     runs = ph_sentence_runs(ph, keep_marks)
+    rows = _run_style_refs(ph, runs, text) if text else [None] * len(runs)
     pieces: list[PhPiece] = []
     for ri, run in enumerate(runs):
         subs = ph_pack(run, max_chars, step=len(pieces), ramp=band.ramp)
@@ -411,7 +446,8 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
             la = (" ".join(subs[i + 1].split()[:band.lookahead_units])
                   if not last_sub and band.lookahead_units else None)
             pieces.append(PhPiece(
-                s, ctx, la, gap_ms if last_sub and not last_run else 0))
+                s, ctx, la, gap_ms if last_sub and not last_run else 0,
+                style_ref=rows[ri]))
     return pieces
 
 

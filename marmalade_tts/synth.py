@@ -94,9 +94,9 @@ def _phoneme_render(engine, engine_name: str, eng_cfg: dict, processed: str,
                     max_chars: "int | None") -> bool:
     """Render one utterance through the phoneme pipeline (kitten in daemon
     mode), so a saved WAV sounds like the same text streamed: real terminal
-    marks, padded colons, uniform inter-run gaps, one pinned style row.
+    marks, padded colons, uniform inter-run gaps, per-run style rows.
     Without it the wrapper's text path applies its own rules (comma-swapped
-    marks, per-sentence style rows) and the two outputs audibly diverge.
+    marks, blind tail trim) and the two outputs audibly diverge.
 
     Chunks use one flat max-size target — there is no first-audio deadline
     here, so seams stay at the minimum the engine's input limit forces.
@@ -125,10 +125,11 @@ def _phoneme_render(engine, engine_name: str, eng_cfg: dict, processed: str,
 
     def _render(i: int, path: str):
         piece = plan[i]
+        row = piece.style_ref if piece.style_ref is not None else style_ref
         t0 = time.monotonic()
         engine.synthesize_phonemes(
             piece.text, path, context=piece.context,
-            lookahead=piece.lookahead, style_ref=style_ref,
+            lookahead=piece.lookahead, style_ref=row,
             pad_marks=stream_play.PAD_MARKS, **synth_kwargs)
         dt = time.monotonic() - t0
         try:
