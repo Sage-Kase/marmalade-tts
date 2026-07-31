@@ -201,15 +201,23 @@ RUN_GAP_MS = 150      # silence between sentence runs
 # Depth was swept on 2026-07-30 (lab round 13, P3 + P6 at 60-char chunks).
 # Max: 2+2 is indistinguishable from the original 4+2 on both passages, so
 # 2 it is — 4 was never more than the first number tried, and the two units
-# saved are ~9% of render time. Below 2 the seams degrade, for two reasons
-# worth keeping straight: a 1-unit LOOKAHEAD made the model treat the chunk
-# as utterance-final and render a runaway pause (an implementation bug,
-# fixed by the daemon's tail cap), while a 1-unit CONTEXT leaves the model
-# still in utterance-initial prosody where the chunk's own audio begins —
-# that one is inherent, not a bug. 1+1 is still open pending a re-listen
-# now that the pause bug is gone.
+# saved are ~9% of render time.
+#
+# Below 2 was re-listened after the tail-cap fix (R14-1, decided
+# 2026-07-31): 0 context is unacceptable, and 1+2 / 1+1 / 2+1 all share a
+# similar audible seam — **2+2 is the settled default**. Max's mechanism,
+# which the data supports: the model articulates a render's opening and
+# closing words differently from mid-sentence words, and the cut lands at
+# a conditioning word's onset — so a depth of 1 on either side leaves the
+# chunk's KEPT edge word adjacent to the render boundary, colored as an
+# opening/closing word. The second unit's job is to push the kept word a
+# full word away from the boundary so it renders as mid-sentence. 2+1
+# (closing-word coloring only; the tail cap tames the worst of it) is the
+# most tolerable degraded form — sanctioned ONLY for a device that can't
+# hold streaming or sub-1s TTFA otherwise, i.e. the slow band.
 CONTEXT_UNITS = 2     # conditioning prefix, cut away after rendering
 LOOKAHEAD_UNITS = 2   # conditioning suffix (i5)
+SLOW_LOOKAHEAD_UNITS = 1  # R14-1: the sanctioned degraded depth (2+1)
 
 # A chunk may end early on a clause mark once it is at least this fraction
 # of the size target — clause ends are the nicest seams, but never at the
@@ -246,18 +254,18 @@ _CLAUSE_CLOSE_AT = 0.75
 #   fast (≤0.15)     conditioning is nearly free — keep the full ramp.
 #   moderate (≤0.35) conditioning still fits under the ceiling, but the
 #                    first chunk must shrink to hold TTFA under ~0.8s.
-#   slow (>0.35)     chunks grow to amortize the conditioning, and the
-#                    playback gate buffers more. Conditioning itself is
-#                    NOT dropped: it is the quality of the seams, and
-#                    trading it away to make a number fit was not a
-#                    decision anyone signed off (Max, 2026-07-30). The
-#                    real lever is how deep conditioning has to be —
-#                    see CONTEXT_UNITS.
+#   slow (>0.35)     chunks grow to amortize the conditioning, the
+#                    playback gate buffers more, and lookahead drops to
+#                    1 unit — the one depth reduction Max sanctioned for
+#                    a struggling device (R14-1, 2026-07-31: 2+1 is "the
+#                    most tolerable" degraded form; context stays at 2
+#                    because opening-word coloring is the worse seam).
 _STREAM_BANDS = (
     # (name, upper marginal-RTF bound, ramp, context units, lookahead units)
     ("fast", 0.15, (60, 100, 160, 250, 400), CONTEXT_UNITS, LOOKAHEAD_UNITS),
     ("moderate", 0.35, (30, 60, 120, 220, 400), CONTEXT_UNITS, LOOKAHEAD_UNITS),
-    ("slow", float("inf"), (90, 180, 320, 400), CONTEXT_UNITS, LOOKAHEAD_UNITS),
+    ("slow", float("inf"), (90, 180, 320, 400), CONTEXT_UNITS,
+     SLOW_LOOKAHEAD_UNITS),
 )
 
 # A band is only left once the estimate is this far past its edge.

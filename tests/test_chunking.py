@@ -646,11 +646,18 @@ class TestBandForRtf:
         assert band_for_rtf(0.55).name == "slow"
 
     def test_every_band_conditions_its_seams(self):
-        # Seam conditioning is quality, not a budget line: slow devices
-        # get bigger chunks, never worse seams.
-        for rtf in (0.09, 0.25, 0.55, 2.0):
+        # Seam conditioning is quality, not a budget line — every band
+        # conditions both sides. The slow band alone drops lookahead to 1
+        # unit: R14-1 (2026-07-31) sanctioned 2+1 as the one acceptable
+        # degraded depth for a device that can't hold streaming at 2+2.
+        # Context stays at 2 everywhere (opening-word coloring is the
+        # worse seam).
+        for rtf in (0.09, 0.25):
             band = band_for_rtf(rtf)
             assert band.context_units == 2 and band.lookahead_units == 2
+        for rtf in (0.55, 2.0):
+            band = band_for_rtf(rtf)
+            assert band.context_units == 2 and band.lookahead_units == 1
 
     def test_first_chunk_shrinks_as_the_device_slows(self):
         assert band_for_rtf(0.25).ramp[0] < band_for_rtf(0.09).ramp[0]
