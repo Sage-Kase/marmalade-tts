@@ -329,3 +329,30 @@ def test_pause_measures_silence_running_past_the_search_window():
     wav = _loud(FRAME) + _quiet(4 * FRAME) + _loud(FRAME)
     (_, n), = inserts(wav, ids, dur, {VOCAB[":"]: 150})
     assert n == int(SR * 0.150) - 4 * FRAME
+
+
+# ── Lookahead tail cap (the shallow-conditioning seam bug) ─────────────────
+
+cap = kitten_daemon._cap_tail_silence
+
+
+def test_tail_cap_trims_a_runaway_pause():
+    # 650ms of model-rendered silence before the lookahead becomes 75ms.
+    wav = _loud(FRAME) + _quiet(26 * FRAME)
+    assert cap(wav, 0, len(wav)) == FRAME + 3 * FRAME
+
+
+def test_tail_cap_leaves_a_short_pause_alone():
+    # The seams Max approved end with almost no silence — don't pad them.
+    wav = _loud(FRAME) + _quiet(FRAME)
+    assert cap(wav, 0, len(wav)) == len(wav)
+
+
+def test_tail_cap_never_cuts_into_speech():
+    wav = _loud(4 * FRAME)
+    assert cap(wav, 0, len(wav)) == len(wav)
+
+
+def test_tail_cap_respects_the_context_cut():
+    wav = _quiet(10 * FRAME)
+    assert cap(wav, 5 * FRAME, len(wav)) == 5 * FRAME + 3 * FRAME

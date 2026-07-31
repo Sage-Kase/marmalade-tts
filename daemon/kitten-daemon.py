@@ -394,6 +394,31 @@ def _splice(wav, inserts: list, start: int, end: int):
     return np.concatenate(pieces)
 
 
+def _cap_tail_silence(wav, start: int, end: int, keep_frames: int = TAIL_KEEP):
+    """Trim a lookahead cut back so it ends with at most ``keep_frames`` of
+    silence. Never pads: a seam that already sounds right is untouched.
+
+    How long a pause the model renders before the lookahead is not stable.
+    It decides how final the chunk sounds from how much follows it, so the
+    same text with a 1-unit lookahead instead of 2 got 650ms of silence on
+    its comma instead of ~0 — a dead gap in the middle of a sentence, and
+    the reason shallow conditioning sounded broken (Max, 2026-07-30: "a
+    weird seam... I feel like it is an implementation bug"). Cutting at the
+    token index inherits whatever the model chose; capping it acoustically
+    makes the seam depend on the text instead of on the lookahead depth.
+
+    Only the lookahead path is capped. A run-final chunk keeps its own
+    trailing silence: that is the sound Max signed off on for the
+    inter-sentence gaps, which measure ~500ms of rendered silence plus the
+    inserted 150ms, not 150ms alone.
+    """
+    keep = keep_frames * FRAME
+    t = end
+    while t > start and abs(float(wav[t - 1])) < _SIL_LEVEL:
+        t -= 1
+    return min(end, t + keep)
+
+
 def _pause_targets(req) -> dict:
     """{token_id: target_ms} from the request's ``pad_marks`` map."""
     raw = req.get("pad_marks") or {}
@@ -439,7 +464,7 @@ def _synth_phonemes(om, req):
     else:
         start = max(0, (int(dur[0]) - HEAD_KEEP)) * FRAME
     if i_la is not None:
-        end = cum[i_la - 1]  # before the boundary space
+        end = _cap_tail_silence(wav, start, cum[i_la - 1])
     else:
         end = len(wav) - max(0, _tail_silence_frames(ids, dur)
                              - TAIL_KEEP) * FRAME
