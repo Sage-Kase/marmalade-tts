@@ -197,7 +197,18 @@ RUN_GAP_MS = 150      # silence between sentence runs
 # "fɹʌmðə", one unit), so a unit is what the model actually treats as a
 # word, and slicing the phoneme string is exact by construction. On the
 # legacy text path these are English words and only approximately this.
-CONTEXT_UNITS = 4     # conditioning prefix, cut away after rendering
+#
+# Depth was swept on 2026-07-30 (lab round 13, P3 + P6 at 60-char chunks).
+# Max: 2+2 is indistinguishable from the original 4+2 on both passages, so
+# 2 it is — 4 was never more than the first number tried, and the two units
+# saved are ~9% of render time. Below 2 the seams degrade, for two reasons
+# worth keeping straight: a 1-unit LOOKAHEAD made the model treat the chunk
+# as utterance-final and render a runaway pause (an implementation bug,
+# fixed by the daemon's tail cap), while a 1-unit CONTEXT leaves the model
+# still in utterance-initial prosody where the chunk's own audio begins —
+# that one is inherent, not a bug. 1+1 is still open pending a re-listen
+# now that the pause bug is gone.
+CONTEXT_UNITS = 2     # conditioning prefix, cut away after rendering
 LOOKAHEAD_UNITS = 2   # conditioning suffix (i5)
 
 # A chunk may end early on a clause mark once it is at least this fraction

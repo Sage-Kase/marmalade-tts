@@ -447,7 +447,7 @@ class TestPhStreamPlan:
         assert plan[1].context is not None and plan[1].lookahead is not None
         assert plan[-1].lookahead is None
         # context/lookahead are exact substrings of the neighbouring pieces
-        assert plan[1].context == " ".join(plan[0].text.split()[-4:])
+        assert plan[1].context == " ".join(plan[0].text.split()[-2:])
         assert plan[0].lookahead == " ".join(plan[1].text.split()[:2])
 
     def test_only_the_run_final_piece_carries_the_gap(self):
@@ -503,7 +503,7 @@ class TestBandForRtf:
         # get bigger chunks, never worse seams.
         for rtf in (0.09, 0.25, 0.55, 2.0):
             band = band_for_rtf(rtf)
-            assert band.context_units == 4 and band.lookahead_units == 2
+            assert band.context_units == 2 and band.lookahead_units == 2
 
     def test_first_chunk_shrinks_as_the_device_slows(self):
         assert band_for_rtf(0.25).ramp[0] < band_for_rtf(0.09).ramp[0]
