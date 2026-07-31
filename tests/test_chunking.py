@@ -361,6 +361,121 @@ class TestSynthesizeOneChunking:
         assert engine.synthesize.call_count >= 2
 
 
+# ── Integration: synthesize_one uses the phoneme pipeline when available ─────
+
+
+def _fake_ph_engine(ph: str, max_chars=500):
+    """The kitten-in-daemon-mode shape: phonemizes (returning ``ph``
+    verbatim) and renders from phonemes. Mirrors test_stream_play's fake so
+    the streamed and non-streamed paths are tested against the same
+    contract."""
+    class Fake:
+        MAX_CHARS = max_chars
+        PARALLEL_CHUNKS = False
+        PHONEME_STREAM = True
+        model_size = "test"
+
+        def __init__(self):
+            self.ph_calls = []
+            self.text_calls = []
+
+        def phonemize(self, text, voice=None, **kw):
+            return ph
+
+        def synthesize_phonemes(self, ph_text, out_path, **kw):
+            _silent_wav(out_path, duration_s=0.05, rate=24000)
+            self.ph_calls.append((ph_text, kw))
+
+        def synthesize(self, text, out_path, **kw):
+            _silent_wav(out_path, duration_s=0.05, rate=24000)
+            self.text_calls.append(text)
+
+    return Fake()
+
+
+PH_TWO_RUNS = "wˈʌn wˈʌn wˈʌn. tˈuː tˈuː tˈuː."
+
+
+class TestSynthesizeOnePhonemePath:
+    """A saved WAV must sound like the same text streamed: real terminal
+    marks, inter-run gaps, one pinned style row — the phoneme pipeline,
+    not the wrapper's text path with its comma swap and per-sentence rows."""
+
+    def _run(self, engine, tmp_path, text="One one one. Two two two."):
+        from marmalade_tts.synth import synthesize_one
+        out = str(tmp_path / "o.wav")
+        r = synthesize_one(
+            text, out,
+            engine=engine, engine_name="kitten",
+            eng_cfg={}, config={"defaults": {"preprocessing": False}},
+            synth_kwargs={}, effect_list=[],
+            preprocess_mode=False, custom_rules=None,
+        )
+        return r, out
+
+    def test_renders_from_phonemes_with_real_marks(self, tmp_path):
+        eng = _fake_ph_engine(PH_TWO_RUNS)
+        r, _ = self._run(eng, tmp_path)
+        assert r is not None
+        assert eng.text_calls == []
+        assert [c[0] for c in eng.ph_calls] == ["wˈʌn wˈʌn wˈʌn.",
+                                                "tˈuː tˈuː tˈuː."]
+
+    def test_short_utterance_still_uses_the_phoneme_path(self, tmp_path):
+        # One sentence, no chunking needed — the whole point of unifying:
+        # short renders must not fall back to the wrapper text path.
+        eng = _fake_ph_engine("wˈʌn wˈʌn wˈʌn.")
+        r, out = self._run(eng, tmp_path, text="One one one.")
+        assert r is not None
+        assert eng.text_calls == []
+        assert len(eng.ph_calls) == 1
+        assert os.path.getsize(out) > 0
+
+    def test_one_style_row_and_pad_marks_on_every_piece(self, tmp_path):
+        eng = _fake_ph_engine(PH_TWO_RUNS)
+        self._run(eng, tmp_path)
+        from marmalade_tts import stream_play
+        for _, kw in eng.ph_calls:
+            assert kw["style_ref"] == len(PH_TWO_RUNS)
+            assert kw["pad_marks"] == stream_play.PAD_MARKS
+
+    def test_inter_run_gap_lands_in_the_output(self, tmp_path):
+        eng = _fake_ph_engine(PH_TWO_RUNS)
+        r, out = self._run(eng, tmp_path)
+        with wave.open(out, "rb") as w:
+            total = w.getnframes() / w.getframerate()
+        # two 50ms renders + one 150ms inter-run gap
+        assert total == pytest.approx(0.25, abs=0.005)
+        assert r.duration == pytest.approx(0.25, abs=0.005)
+
+    def test_flat_max_size_chunks_not_the_streaming_ramp(self, tmp_path):
+        # 20 words = 100 ph chars in one sentence with max_chars=500: the
+        # streaming ramp would cut at ~60 chars; a saved render must not.
+        ph_run = ("wˈʌn " * 20).strip() + "."
+        eng = _fake_ph_engine(ph_run)
+        self._run(eng, tmp_path, text=("one " * 20).strip() + ".")
+        assert [c[0] for c in eng.ph_calls] == [ph_run]
+
+    def test_falls_back_to_text_path_when_phonemize_fails(self, tmp_path):
+        eng = _fake_ph_engine(PH_TWO_RUNS)
+
+        def boom(text, voice=None, **kw):
+            raise RuntimeError("daemon down")
+        eng.phonemize = boom
+
+        r, _ = self._run(eng, tmp_path)
+        assert r is not None
+        assert eng.ph_calls == []
+        assert len(eng.text_calls) == 1
+
+    def test_phoneme_stats_are_keyed_apart_from_text_stats(self, tmp_path):
+        from marmalade_tts import perfstats
+        eng = _fake_ph_engine(PH_TWO_RUNS)
+        self._run(eng, tmp_path)
+        assert perfstats.estimate("kitten", "test:ph") is not None
+        assert perfstats.estimate("kitten", "test") is None
+
+
 # ── phoneme-space streaming plan ─────────────────────────────────────────────
 
 # Real espeak output from the kitten daemon (en-us, 2026-07-30).

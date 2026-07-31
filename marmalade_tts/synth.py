@@ -89,6 +89,169 @@ def apply_preprocessing(
     return pp.preprocess(utt, engine=engine_name)
 
 
+def _phoneme_render(engine, engine_name: str, eng_cfg: dict, processed: str,
+                    out_path: str, synth_kwargs: dict,
+                    max_chars: "int | None") -> bool:
+    """Render one utterance through the phoneme pipeline (kitten in daemon
+    mode), so a saved WAV sounds like the same text streamed: real terminal
+    marks, padded colons, uniform inter-run gaps, one pinned style row.
+    Without it the wrapper's text path applies its own rules (comma-swapped
+    marks, per-sentence style rows) and the two outputs audibly diverge.
+
+    Chunks use one flat max-size target — there is no first-audio deadline
+    here, so seams stay at the minimum the engine's input limit forces.
+
+    Returns False (never raises) when the engine lacks the phoneme path or
+    phonemization fails — the caller then renders via the text path.
+    """
+    from . import chunking, cli, perfstats, stream_play
+
+    # Strict identity check: mocked engines return truthy attributes.
+    if max_chars is None or getattr(engine, "PHONEME_STREAM", False) is not True:
+        return False
+    mkey = f"{perfstats.model_key(engine, eng_cfg)}:ph"
+    band = chunking.StreamBand("full", (max_chars,),
+                               chunking.CONTEXT_UNITS,
+                               chunking.LOOKAHEAD_UNITS)
+    plan, style_ref = stream_play._phoneme_plan(
+        engine, processed, max_chars, synth_kwargs, engine_name, mkey,
+        band=band)
+    if plan is None:
+        return False
+
+    import os
+    import tempfile
+    import time
+
+    def _render(i: int, path: str):
+        piece = plan[i]
+        t0 = time.monotonic()
+        engine.synthesize_phonemes(
+            piece.text, path, context=piece.context,
+            lookahead=piece.lookahead, style_ref=style_ref,
+            pad_marks=stream_play.PAD_MARKS, **synth_kwargs)
+        dt = time.monotonic() - t0
+        try:
+            cond_chars = (len(piece.context or "")
+                          + len(piece.lookahead or ""))
+            perfstats.record(engine_name, mkey, len(piece.text), dt,
+                             cli.wav_duration(path),
+                             cond_chars=cond_chars, solo=(i == 0))
+        except Exception:
+            pass
+        if piece.gap_after_ms:
+            chunking.pad_wav_end(path, piece.gap_after_ms)
+
+    if len(plan) == 1:
+        _render(0, out_path)
+        return True
+
+    tmp_paths: list[str] = []
+    try:
+        for i in range(len(plan)):
+            fd, p = tempfile.mkstemp(
+                prefix=f"marmalade-chunk-{i:03d}-", suffix=".wav")
+            os.close(fd)
+            tmp_paths.append(p)
+
+        # First piece alone: warms/auto-starts the daemon race-free, and is
+        # the one uncontended perfstats sample (solo=True).
+        _render(0, tmp_paths[0])
+
+        rest = list(range(1, len(plan)))
+        workers = 1
+        if getattr(engine, "PARALLEL_CHUNKS", False):
+            workers = min(4, os.cpu_count() or 1, len(rest))
+        if workers > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(lambda i: _render(i, tmp_paths[i]), rest))
+        else:
+            for i in rest:
+                _render(i, tmp_paths[i])
+        chunking.concat_wavs(tmp_paths, out_path)
+    finally:
+        for p in tmp_paths:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+    return True
+
+
+def _text_render(engine, engine_name: str, eng_cfg: dict, processed: str,
+                 out_path: str, synth_kwargs: dict,
+                 max_chars: "int | None") -> None:
+    """The text-path render: transparent chunking + ``engine.synthesize``.
+
+    If the text exceeds ``max_chars``, split on sentence boundaries,
+    synthesize each chunk into a temp WAV, and concatenate into
+    ``out_path``. The user-visible contract is one input → one WAV;
+    chunking is implementation detail.
+    """
+    from . import chunking, cli
+
+    if max_chars is not None and len(processed) > max_chars:
+        chunks = chunking.chunk_text(processed, max_chars)
+    else:
+        chunks = None
+
+    # Every clean render (pre-effects) feeds the per-engine+model RTF/CPS
+    # averages that the chunk-streaming gate consumes. Best-effort: stats
+    # must never break synthesis.
+    import time as _time
+    from . import perfstats
+    _mkey = perfstats.model_key(engine, eng_cfg)
+
+    def _render(piece: str, path: str):
+        t0 = _time.monotonic()
+        engine.synthesize(piece, path, **synth_kwargs)
+        try:
+            perfstats.record(engine_name, _mkey, len(piece),
+                             _time.monotonic() - t0, cli.wav_duration(path))
+        except Exception:
+            pass
+
+    if not chunks or len(chunks) == 1:
+        _render(processed, out_path)
+        return
+
+    import os as _os
+    import tempfile as _tempfile
+    tmp_paths: list[str] = []
+    try:
+        for i in range(len(chunks)):
+            fd, p = _tempfile.mkstemp(
+                prefix=f"marmalade-chunk-{i:03d}-", suffix=".wav")
+            _os.close(fd)
+            tmp_paths.append(p)
+
+        # The first chunk always renders alone: it warms/auto-starts the
+        # engine's daemon, so parallel submissions can't race the spawn.
+        _render(chunks[0], tmp_paths[0])
+
+        rest = list(zip(chunks[1:], tmp_paths[1:]))
+        workers = 1
+        if getattr(engine, "PARALLEL_CHUNKS", False):
+            workers = min(4, _os.cpu_count() or 1, len(rest))
+        if workers > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                # list() drains the iterator so the first chunk error
+                # propagates; output order is fixed by tmp_paths.
+                list(pool.map(lambda cp: _render(cp[0], cp[1]), rest))
+        else:
+            for piece, p in rest:
+                _render(piece, p)
+        chunking.concat_wavs(tmp_paths, out_path)
+    finally:
+        for p in tmp_paths:
+            try:
+                _os.unlink(p)
+            except OSError:
+                pass
+
+
 def synthesize_one(
     utt: str,
     out_path: str,
@@ -133,71 +296,16 @@ def synthesize_one(
         return None
 
     # ── Synthesis + effects ──
-    # Transparent chunking: if the preprocessed text exceeds the engine's
-    # MAX_CHARS limit (or the engines.<name>.max_chars config override),
-    # split on sentence boundaries, synthesize each chunk into a temp WAV,
-    # and concatenate the result into out_path. The user-visible contract
-    # is one input → one WAV; chunking is implementation detail.
     from . import chunking
     max_chars = chunking.resolve_max_chars(engine, eng_cfg)
-    if max_chars is not None and len(processed) > max_chars:
-        chunks = chunking.chunk_text(processed, max_chars)
-    else:
-        chunks = None
 
-    # Every clean render (pre-effects) feeds the per-engine+model RTF/CPS
-    # averages that the chunk-streaming gate consumes. Best-effort: stats
-    # must never break synthesis.
-    import time as _time
-    from . import perfstats
-    _mkey = perfstats.model_key(engine, eng_cfg)
-
-    def _render(piece: str, path: str):
-        t0 = _time.monotonic()
-        engine.synthesize(piece, path, **synth_kwargs)
-        try:
-            perfstats.record(engine_name, _mkey, len(piece),
-                             _time.monotonic() - t0, cli.wav_duration(path))
-        except Exception:
-            pass
-
-    if not chunks or len(chunks) == 1:
-        _render(processed, out_path)
-    else:
-        import os as _os
-        import tempfile as _tempfile
-        tmp_paths: list[str] = []
-        try:
-            for i in range(len(chunks)):
-                fd, p = _tempfile.mkstemp(
-                    prefix=f"marmalade-chunk-{i:03d}-", suffix=".wav")
-                _os.close(fd)
-                tmp_paths.append(p)
-
-            # The first chunk always renders alone: it warms/auto-starts the
-            # engine's daemon, so parallel submissions can't race the spawn.
-            _render(chunks[0], tmp_paths[0])
-
-            rest = list(zip(chunks[1:], tmp_paths[1:]))
-            workers = 1
-            if getattr(engine, "PARALLEL_CHUNKS", False):
-                workers = min(4, _os.cpu_count() or 1, len(rest))
-            if workers > 1:
-                from concurrent.futures import ThreadPoolExecutor
-                with ThreadPoolExecutor(max_workers=workers) as pool:
-                    # list() drains the iterator so the first chunk error
-                    # propagates; output order is fixed by tmp_paths.
-                    list(pool.map(lambda cp: _render(cp[0], cp[1]), rest))
-            else:
-                for piece, p in rest:
-                    _render(piece, p)
-            chunking.concat_wavs(tmp_paths, out_path)
-        finally:
-            for p in tmp_paths:
-                try:
-                    _os.unlink(p)
-                except OSError:
-                    pass
+    # Engines with a phoneme pipeline (kitten in daemon mode) render
+    # through it even when the text wouldn't chunk, so saved WAVs match
+    # the streamed sound. Falls back to the text path on any miss.
+    if not _phoneme_render(engine, engine_name, eng_cfg, processed, out_path,
+                           synth_kwargs, max_chars):
+        _text_render(engine, engine_name, eng_cfg, processed, out_path,
+                     synth_kwargs, max_chars)
 
     cli_helpers.apply_effects_if_any(out_path, effect_list, config)
 

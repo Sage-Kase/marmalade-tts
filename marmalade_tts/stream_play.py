@@ -103,11 +103,16 @@ def should_start(buffered_audio_s: float, remaining_chunk_chars: list[int],
 
 
 def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict,
-                  engine_name: str, mkey: "str | None"):
+                  engine_name: str, mkey: "str | None", band=None):
     """(plan, style_ref) for the phoneme-direct path, or (None, None) when
     the engine doesn't support it or phonemization fails — the caller then
     plans in text space. Never fatal: this is an optimization over a path
-    that already works."""
+    that already works.
+
+    A caller may pass its own ``band`` when it has no time-to-first-audio
+    deadline to protect (the non-streamed render in ``synth`` uses one flat
+    max-size target); by default chunk sizes follow the device's measured
+    marginal RTF."""
     if not getattr(engine, "PHONEME_STREAM", False):
         return None, None
     try:
@@ -119,11 +124,14 @@ def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict,
     # Chunk sizes and conditioning depth follow the device's measured
     # marginal RTF (chunking._STREAM_BANDS explains the cost model and
     # what each band trades away).
-    band = chunking.band_for_rtf(perfstats.estimate_marginal(engine_name, mkey),
-                                 perfstats.band(engine_name, mkey))
+    banded = band is None
+    if banded:
+        band = chunking.band_for_rtf(
+            perfstats.estimate_marginal(engine_name, mkey),
+            perfstats.band(engine_name, mkey))
     plan = chunking.ph_stream_plan(ph, max_chars,
                                    keep_marks=KEEP_TERMINAL_MARKS, band=band)
-    if plan:
+    if plan and banded:
         perfstats.set_band(engine_name, mkey, band.name)
     # One style row for the whole utterance: the length-indexed row the
     # model would have used for a single whole render, so chunks can't
