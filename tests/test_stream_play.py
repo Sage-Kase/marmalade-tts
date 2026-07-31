@@ -351,8 +351,9 @@ class TestPhonemeStream:
             engine=eng, engine_name="kitten", play=lambda p: None, **_COMMON)
         assert r is not None
         assert eng.text_calls == []
-        assert [c[0] for c in eng.ph_calls] == ["wˈʌn wˈʌn wˈʌn,",
-                                                "tˈuː tˈuː tˈuː,"]
+        # Terminal marks render for real (round-15 verdict) — no comma swap.
+        assert [c[0] for c in eng.ph_calls] == ["wˈʌn wˈʌn wˈʌn.",
+                                                "tˈuː tˈuː tˈuː."]
 
     def test_one_style_row_for_the_whole_utterance(self, tmp_path):
         eng = _fake_ph_engine(PH_TWO_RUNS)

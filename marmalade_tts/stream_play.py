@@ -65,11 +65,13 @@ LOOKAHEAD_WORDS = 2
 # round decided it.
 #
 # KEEP_TERMINAL_MARKS: terminal marks NOT swapped for a comma before
-# rendering. '.' and '?' are swapped (the wrapper's trick, which Max
-# preferred to continuous real-mark rendering). '!' is kept: Max's
-# 2026-07-30 A/B found the real mark sounded the same as the comma, so the
-# swap buys nothing there and the honest input wins the tie.
-KEEP_TERMINAL_MARKS = "!"
+# rendering. All real, none swapped — Max's round-15 verdict ("all real is
+# the best") once the swap was finally tested in isolation. The swap had
+# ridden in from the kittentts wrapper on a confounded A/B (J vs J2 changed
+# run-splitting at the same time); the clean per-mark tests showed the real
+# mark equal on '!' and better on '.' and '?' — a comma ending makes the
+# model drawl toward a continuation that never comes (P9 10.82s → 9.45s).
+KEEP_TERMINAL_MARKS = ".!?"
 # The model renders an intra-sentence colon in ~87ms, which reads as no
 # pause at all; topped up to a floor of inserted silence.
 PAD_MARKS = {":": 150}

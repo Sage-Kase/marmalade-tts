@@ -176,9 +176,9 @@ def chunk_for_streaming(text: str, max_chars: int) -> list[str]:
 #     you put the keys,' + '" she asked,') and destroyed the question —
 #     this is why the phoneme pipeline beat the wrapper outright on
 #     dialogue (P9) and instructions (P10).
-#   * Terminal .!? are swapped for a comma AFTER espeak has seen the real
-#     marks, so the model gets sentence-final phonology with the wrapper's
-#     pausing (which Max preferred to continuous real-mark rendering).
+#   * Terminal marks render for real (round 15: the wrapper's comma swap
+#     lost or tied on every mark once tested in isolation). The swap
+#     machinery stays parameterized (``keep_marks``) for A/B work.
 #   * Runs are joined by a uniform 150ms gap. Mark-proportional gaps
 #     (J2g) gave no audible win.
 #   * Conditioning (context/lookahead) applies ONLY inside a sentence run.
@@ -224,9 +224,9 @@ _CLAUSE_CLOSE_AT = 0.75
 # ~/coding/scratch/chunk-lab/rtf_bands.py, 5 reps per size):
 #
 #     bare render_s = 0.021 + 0.092 × audio_s      (fit over 20–400 ph chars)
-#     conditioning  = +2.0s of audio rendered and thrown away, per chunk,
-#                     independent of the chunk's own size (4 context words
-#                     + 2 lookahead words)
+#     conditioning  = ~2.0s of audio rendered and thrown away per chunk at
+#                     the 4+2 units measured, independent of the chunk's
+#                     own size (roughly proportionally less at today's 2+2)
 #
 # So per-chunk overhead is dominated by conditioning, not by the request:
 # at 20 ph chars the chunk pays ×1.58 its own render; at 250 chars, ×1.09.
