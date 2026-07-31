@@ -116,6 +116,15 @@ class KokoroEngine(Engine):
         self.lang = cfg.get("lang")
         self.device = cfg.get("device", "cpu")
         self.use_daemon = cfg.get("daemon", False)
+        # Phoneme-direct planning (chunking.ph_stream_plan), daemon only —
+        # the daemon holds the misaki G2P and the acoustic-cut synthesis.
+        self.PHONEME_STREAM = self.use_daemon
+        # Style rows come from PHONEME lengths: kokoro's native rule is
+        # pack[len(ps)-1] over the whole segment (it does not sentence-
+        # split), so the utterance-wide row is stock-faithful here.
+        # Whether per-sentence rows sound better is the open K1 lab
+        # question — flip to "ph-sentence" if Max's ear picks them.
+        self.STYLE_ROWS = "ph-utterance"
 
     def _resolve_lang(self, canonical_voice: str, cli_lang: str | None) -> str:
         """Apply the language-precedence rule.
@@ -152,6 +161,50 @@ class KokoroEngine(Engine):
             cmd += ["--speed", str(speed)]
 
         run_in_venv(KOKORO_BIN, cmd, env_extra=env_extra, engine_name="kokoro")
+
+    def phonemize(self, text: str, voice: str = None, lang: str = None,
+                  **kwargs) -> str:
+        """One misaki G2P pass over the whole utterance, via the daemon.
+        Phase 1 of the phoneme-direct streaming path."""
+        import tempfile
+        v = resolve_voice(voice or self.voice)
+        fd, tmp = tempfile.mkstemp(prefix="marmalade-ph-", suffix=".txt")
+        os.close(fd)
+        try:
+            dmgr.synthesize("kokoro", {
+                "op": "phonemize", "text": text,
+                "lang": self._resolve_lang(v, lang), "out": tmp},
+                auto_start=True)
+            with open(tmp, encoding="utf-8") as f:
+                return f.read().strip()
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+    def synthesize_phonemes(self, ph_text: str, out_path: str,
+                            voice: str = None, speed: float = 1.0,
+                            lang: str = None, context: str = None,
+                            lookahead: str = None, style_ref: int = None,
+                            pad_marks: dict = None, **kwargs):
+        """Synthesize from phonemes with acoustic conditioning cuts.
+
+        ``style_ref`` pins the style-pack row (510 rows; kokoro indexes by
+        phoneme length natively), ``pad_marks`` floors a mark's rendered
+        pause with inserted silence."""
+        v = resolve_voice(voice or self.voice)
+        request = {"ph_text": ph_text, "voice": v, "speed": speed,
+                   "lang": self._resolve_lang(v, lang), "out": out_path}
+        if context:
+            request["ph_context"] = context
+        if lookahead:
+            request["ph_lookahead"] = lookahead
+        if style_ref is not None:
+            request["style_ref"] = int(style_ref)
+        if pad_marks:
+            request["pad_marks"] = pad_marks
+        dmgr.synthesize("kokoro", request, auto_start=True)
 
     def list_voices(self):
         print("Kokoro voices (use the bare name, e.g. \"george\"):\n")

@@ -587,6 +587,18 @@ class TestPhStreamPlan:
         assert len(plan) > 2
         assert {p.style_ref for p in plan} == {len(text)}
 
+    def test_ph_rows_derive_from_run_phoneme_lengths(self):
+        # kokoro indexes its pack by phoneme count: pack[len(ps)-1].
+        plan = ph_stream_plan(PH_DIALOGUE, max_chars=500, ph_rows=True)
+        runs = ph_sentence_runs(PH_DIALOGUE)
+        assert [p.style_ref for p in plan] == [len(r) - 1 for r in runs]
+
+    def test_ph_rows_sub_chunks_share_their_run_row(self):
+        run = " ".join(["wˈʌnwˈʌn"] * 60) + "."
+        plan = ph_stream_plan(run, max_chars=500, ph_rows=True)
+        assert len(plan) > 2
+        assert {p.style_ref for p in plan} == {len(run) - 1}
+
     def test_style_ref_fallback_scales_by_ph_ratio_on_count_mismatch(self):
         # espeak erases the abbreviation dot ("Mr." -> mˈɪstɚ), so the text
         # splits into more sentences than the phonemes — the pairing falls

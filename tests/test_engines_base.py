@@ -169,6 +169,39 @@ class TestDaemonRequestCarriesModel:
         req = syn.call_args.args[1]
         assert req["model"] == "tts_models/x/y/z"
 
+    def test_kokoro_phonemize_request_shape(self):
+        from marmalade_tts.engines.kokoro import KokoroEngine
+        eng = KokoroEngine({"daemon": True})
+        with self._capture() as syn:
+            eng.phonemize("hi there", voice="george")
+        req = syn.call_args.args[1]
+        assert req["op"] == "phonemize"
+        assert req["text"] == "hi there"
+        assert req["lang"] == "b"
+
+    def test_kokoro_synthesize_phonemes_request_shape(self):
+        from marmalade_tts.engines.kokoro import KokoroEngine
+        eng = KokoroEngine({"daemon": True})
+        with self._capture() as syn:
+            eng.synthesize_phonemes(
+                "həlˈO ðˈɛɹ", "/tmp/o.wav", voice="heart",
+                context="ktx", lookahead="lˈʌk", style_ref=42,
+                pad_marks={":": 150})
+        req = syn.call_args.args[1]
+        assert req["ph_text"] == "həlˈO ðˈɛɹ"
+        assert req["voice"] == "af_heart"
+        assert req["lang"] == "a"
+        assert req["ph_context"] == "ktx"
+        assert req["ph_lookahead"] == "lˈʌk"
+        assert req["style_ref"] == 42
+        assert req["pad_marks"] == {":": 150}
+
+    def test_kokoro_phoneme_stream_flag_follows_daemon_mode(self):
+        from marmalade_tts.engines.kokoro import KokoroEngine
+        assert KokoroEngine({"daemon": True}).PHONEME_STREAM is True
+        assert KokoroEngine({}).PHONEME_STREAM is False
+        assert KokoroEngine({"daemon": True}).STYLE_ROWS == "ph-utterance"
+
     def test_matcha_sends_model(self):
         from marmalade_tts.engines.matcha import MatchaEngine
         eng = MatchaEngine({"daemon": True})

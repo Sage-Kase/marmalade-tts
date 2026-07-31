@@ -433,16 +433,24 @@ def _run_style_refs(ph: str, ph_runs: list[str], text: str) -> list[int]:
 def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
                    gap_ms: int = RUN_GAP_MS,
                    band: "StreamBand | None" = None,
-                   text: "str | None" = None) -> list[PhPiece]:
+                   text: "str | None" = None,
+                   ph_rows: bool = False) -> list[PhPiece]:
     """The full streaming plan for one phonemized utterance.
 
     ``text`` is the pre-phonemization utterance; when given, each run's
-    pieces carry the run's style row (see ``_run_style_refs``). Without it
-    ``style_ref`` stays None and the caller picks a row."""
+    pieces carry the run's style row (see ``_run_style_refs``).
+    ``ph_rows`` instead derives each run's row from its own PHONEME length
+    (kokoro indexes its pack by phoneme count — ``pack[len(ps)-1]``).
+    With neither, ``style_ref`` stays None and the caller picks a row."""
     if band is None:
         band = band_for_rtf(None)
     runs = ph_sentence_runs(ph, keep_marks)
-    rows = _run_style_refs(ph, runs, text) if text else [None] * len(runs)
+    if text:
+        rows = _run_style_refs(ph, runs, text)
+    elif ph_rows:
+        rows = [max(0, len(r) - 1) for r in runs]
+    else:
+        rows = [None] * len(runs)
     pieces: list[PhPiece] = []
     for ri, run in enumerate(runs):
         subs = ph_pack(run, max_chars, step=len(pieces), ramp=band.ramp)

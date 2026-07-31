@@ -117,7 +117,7 @@ def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict,
     if not getattr(engine, "PHONEME_STREAM", False):
         return None, None
     try:
-        ph = engine.phonemize(text, voice=synth_kwargs.get("voice"))
+        ph = engine.phonemize(text, **synth_kwargs)
     except Exception:  # daemon down, engine mid-refactor — use the text path
         return None, None
     if not ph or not ph.strip():
@@ -130,14 +130,25 @@ def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict,
         band = chunking.band_for_rtf(
             perfstats.estimate_marginal(engine_name, mkey),
             perfstats.band(engine_name, mkey))
-    plan = chunking.ph_stream_plan(ph, max_chars,
-                                   keep_marks=KEEP_TERMINAL_MARKS, band=band,
-                                   text=text)
+    # How style rows are chosen is per-engine. kitten's pack is indexed by
+    # TEXT sentence length (stock-faithful per-run registers — Max's R16-1
+    # verdict); kokoro's by PHONEME length with no sentence split, so its
+    # stock-faithful row is utterance-wide ("ph-utterance"; per-run rows =
+    # "ph-sentence" — the K1 lab A/B decides). Anything unrecognized (incl.
+    # mocked engines) gets kitten's rule.
+    mode = getattr(engine, "STYLE_ROWS", None)
+    if mode not in ("ph-utterance", "ph-sentence"):
+        mode = "text-sentence"
+    plan = chunking.ph_stream_plan(
+        ph, max_chars, keep_marks=KEEP_TERMINAL_MARKS, band=band,
+        text=text if mode == "text-sentence" else None,
+        ph_rows=(mode == "ph-sentence"))
     if plan and banded:
         perfstats.set_band(engine_name, mkey, band.name)
-    # Pieces carry per-run style rows (stock-faithful registers — Max's
-    # R16-1 verdict); len(ph) is only the fallback for a piece without one.
-    return (plan, len(ph)) if plan else (None, None)
+    # Pieces carry per-run style rows; the second value is the fallback for
+    # a piece without one (mode-matched: ph-length rule for the ph modes).
+    fallback = max(0, len(ph) - 1) if mode != "text-sentence" else len(ph)
+    return (plan, fallback) if plan else (None, None)
 
 
 def _effective_workers(engine, n_rest: int) -> int:

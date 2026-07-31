@@ -365,6 +365,28 @@ class TestPhonemeStream:
         rows = [kw["style_ref"] for _, kw in eng.ph_calls]
         assert rows == [len("One one one."), len("Two two two two two.")]
 
+    def test_ph_utterance_rows_pin_one_row_from_ph_length(self, tmp_path):
+        # kokoro-native (STYLE_ROWS="ph-utterance"): no sentence split in
+        # stock kokoro, so every piece shares the utterance row len(ph)-1.
+        eng = _fake_ph_engine(PH_TWO_RUNS)
+        eng.STYLE_ROWS = "ph-utterance"
+        try_stream_single(
+            "One one one. Two two two.", str(tmp_path / "o.wav"),
+            engine=eng, engine_name="kokoro", play=lambda p: None, **_COMMON)
+        rows = [kw["style_ref"] for _, kw in eng.ph_calls]
+        assert rows == [len(PH_TWO_RUNS) - 1] * 2
+
+    def test_ph_sentence_rows_come_from_run_ph_lengths(self, tmp_path):
+        # The K1 lab's B variant: per-run rows, indexed by phoneme count.
+        eng = _fake_ph_engine(PH_TWO_RUNS)
+        eng.STYLE_ROWS = "ph-sentence"
+        try_stream_single(
+            "One one one. Two two two.", str(tmp_path / "o.wav"),
+            engine=eng, engine_name="kokoro", play=lambda p: None, **_COMMON)
+        rows = [kw["style_ref"] for _, kw in eng.ph_calls]
+        assert rows == [len("wˈʌn wˈʌn wˈʌn.") - 1,
+                        len("tˈuː tˈuː tˈuː.") - 1]
+
     def test_inter_run_gap_lands_in_the_output(self, tmp_path):
         eng = _fake_ph_engine(PH_TWO_RUNS)
         out = str(tmp_path / "o.wav")
