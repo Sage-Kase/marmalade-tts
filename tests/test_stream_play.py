@@ -175,6 +175,24 @@ class TestShouldStart:
         assert should_start(2.0, [20], est)
         assert not should_start(2.0, [(20, 40)], est)
 
+    def test_inserted_gaps_buy_render_time(self):
+        # (kept, rendered, gap_s) triples: a chunk's deterministic inserted
+        # silence plays before the NEXT chunk is needed, so it extends the
+        # next deadline like kept audio. rtf 0.5, 10 chars/audio-s, 1.8s
+        # buffer, chunks of 20 then 40: chunk 2 is ready at 1.5*(1.0+2.0)
+        # = 4.5 but needed at 1.8+2.0 = 3.8 — refused — unless chunk 1's
+        # 0.8s gap pushes the deadline to 4.6.
+        est = (0.5, 10.0)
+        assert not should_start(1.8, [(20, 20, 0.0), (40, 40, 0.0)], est)
+        assert should_start(1.8, [(20, 20, 0.8), (40, 40, 0.0)], est)
+
+    def test_own_gap_does_not_help_own_deadline(self):
+        # The gap plays AFTER its chunk — it must not relax that same
+        # chunk's deadline. One 40-char chunk, 2.0s buffer: refused
+        # (1.5*0.5*4 = 3.0 > 2.0) regardless of its own trailing gap.
+        est = (0.5, 10.0)
+        assert not should_start(2.0, [(40, 40, 5.0)], est)
+
 
 # ── try_stream_single pipeline ───────────────────────────────────────────────
 

@@ -82,16 +82,19 @@ def should_start(buffered_audio_s: float, remaining_chunk_chars: list,
                  est: "tuple[float, float] | None",
                  safety: float = SAFETY) -> bool:
     """The playback gate. ``remaining_chunk_chars`` lists the sizes of the
-    not-yet-rendered chunks in play order — either plain char counts, or
+    not-yet-rendered chunks in play order — plain char counts,
     ``(kept_chars, rendered_chars)`` pairs when conditioning makes a chunk
-    render more audio than it keeps. ``est`` is (rtf, chars_per_audio_s)
-    or None; with pairs, ``rtf`` should be the MARGINAL rtf (render cost
-    per rendered second) so the estimate is chunk-size-independent — the
-    plain per-kept-second EMA rises on small chunks (fixed overhead), and
-    on an engine like kokoro that poisoned the gate into waiting extra
-    chunks for nothing (the same size→rtf feedback the marginal stat was
-    built to kill). Every remaining chunk must be renderable before the
-    play head reaches it."""
+    render more audio than it keeps, or ``(kept, rendered, gap_s)``
+    triples when the chunk also carries deterministic inserted silence
+    (inter-run gaps, mark top-ups): the gap plays before the next chunk
+    is needed, so it buys render time exactly like kept audio. ``est`` is
+    (rtf, chars_per_audio_s) or None; with pairs, ``rtf`` should be the
+    MARGINAL rtf (render cost per rendered second) so the estimate is
+    chunk-size-independent — the plain per-kept-second EMA rises on small
+    chunks (fixed overhead), and on an engine like kokoro that poisoned
+    the gate into waiting extra chunks for nothing (the same size→rtf
+    feedback the marginal stat was built to kill). Every remaining chunk
+    must be renderable before the play head reaches it."""
     if not remaining_chunk_chars:
         return True
     if est is None:
@@ -102,11 +105,17 @@ def should_start(buffered_audio_s: float, remaining_chunk_chars: list,
     t_ready = 0.0                    # est render-completion time of chunk k
     t_needed = buffered_audio_s      # play head reaches chunk k at this time
     for item in remaining_chunk_chars:
-        kept, rendered = (item, item) if isinstance(item, int) else item
+        gap_s = 0.0
+        if isinstance(item, int):
+            kept = rendered = item
+        elif len(item) == 2:
+            kept, rendered = item
+        else:
+            kept, rendered, gap_s = item
         t_ready += rtf * (rendered / cps)
         if safety * t_ready > t_needed:
             return False
-        t_needed += kept / cps
+        t_needed += kept / cps + gap_s
     return True
 
 
@@ -318,7 +327,8 @@ def try_stream_single(
             # size-independent marginal rtf — see should_start.
             remaining = [(len(chunks[j]),
                           len(chunks[j]) + len(plan[j].context or "")
-                          + len(plan[j].lookahead or ""))
+                          + len(plan[j].lookahead or ""),
+                          plan[j].gap_after_ms / 1000.0)
                          for j in range(n) if j not in ready]
         else:
             remaining = [len(chunks[j]) for j in range(n) if j not in ready]
