@@ -196,6 +196,26 @@ class TestDaemonRequestCarriesModel:
         assert req["style_ref"] == 42
         assert req["pad_marks"] == {":": 150}
 
+    def test_kokoro_band_table_gate_and_conditioning_invariants(self):
+        # The table's whole point (see the derivation comment in
+        # engines/kokoro.py): the fast ramp must open the playback gate
+        # right after chunk 0 at kokoro's EFFECTIVE rtf (up to ~0.44 —
+        # gate deadline SAFETY*rtf*sum(a[1..k]) <= a[0] + sum(a[1..k-1]))
+        # and conditioning must not degrade below 2+2 outside the slow
+        # band (R14-1: 2+1 is sanctioned only when streaming can't hold).
+        from marmalade_tts import chunking
+        from marmalade_tts.engines import kokoro
+        fast, slow = kokoro.STREAM_BANDS
+        assert fast[3] == fast[4] == chunking.CONTEXT_UNITS == 2
+        assert slow[4] == chunking.SLOW_LOOKAHEAD_UNITS
+        ramp = fast[2]
+        for k in range(1, len(ramp)):
+            assert 1.5 * 0.44 * sum(ramp[1:k + 1]) <= \
+                ramp[0] + sum(ramp[1:k]), f"gate stalls at ramp step {k}"
+        # This desktop (measured mrtf ~0.36) must stay in the fast band.
+        assert chunking.band_for_rtf(
+            0.36, bands=kokoro.STREAM_BANDS).name == "fast"
+
     def test_kokoro_phoneme_stream_flag_follows_daemon_mode(self):
         from marmalade_tts.engines.kokoro import KokoroEngine
         assert KokoroEngine({"daemon": True}).PHONEME_STREAM is True

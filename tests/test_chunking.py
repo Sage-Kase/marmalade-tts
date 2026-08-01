@@ -686,6 +686,21 @@ class TestBandForRtf:
     def test_unknown_stored_band_is_ignored(self):
         assert band_for_rtf(0.09, current="turbo").name == "fast"
 
+    def test_engine_declared_table_replaces_the_shared_one(self):
+        # An engine with a different cost profile supplies its own edges
+        # and ramps (kokoro); the shared table stays kitten's.
+        custom = (("fast", 0.50, (30, 50), 2, 2),
+                  ("slow", float("inf"), (90, 180), 2, 1))
+        assert band_for_rtf(0.36, bands=custom).name == "fast"
+        assert band_for_rtf(0.36).name == "slow"  # shared table: past 0.35
+        assert band_for_rtf(0.60, bands=custom).lookahead_units == 1
+
+    def test_engine_table_hysteresis_uses_its_own_edges(self):
+        custom = (("fast", 0.50, (30, 50), 2, 2),
+                  ("slow", float("inf"), (90, 180), 2, 1))
+        assert band_for_rtf(0.55, current="fast", bands=custom).name == "fast"
+        assert band_for_rtf(0.60, current="fast", bands=custom).name == "slow"
+
 
 class TestPlanUsesTheBand:
     def test_band_ramp_sizes_the_chunks(self):

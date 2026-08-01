@@ -78,13 +78,20 @@ KEEP_TERMINAL_MARKS = ".!?"
 PAD_MARKS = {":": 150}
 
 
-def should_start(buffered_audio_s: float, remaining_chunk_chars: list[int],
+def should_start(buffered_audio_s: float, remaining_chunk_chars: list,
                  est: "tuple[float, float] | None",
                  safety: float = SAFETY) -> bool:
     """The playback gate. ``remaining_chunk_chars`` lists the sizes of the
-    not-yet-rendered chunks in play order; ``est`` is
-    (rtf, chars_per_audio_s) or None. Every remaining chunk must be
-    renderable before the play head reaches it."""
+    not-yet-rendered chunks in play order — either plain char counts, or
+    ``(kept_chars, rendered_chars)`` pairs when conditioning makes a chunk
+    render more audio than it keeps. ``est`` is (rtf, chars_per_audio_s)
+    or None; with pairs, ``rtf`` should be the MARGINAL rtf (render cost
+    per rendered second) so the estimate is chunk-size-independent — the
+    plain per-kept-second EMA rises on small chunks (fixed overhead), and
+    on an engine like kokoro that poisoned the gate into waiting extra
+    chunks for nothing (the same size→rtf feedback the marginal stat was
+    built to kill). Every remaining chunk must be renderable before the
+    play head reaches it."""
     if not remaining_chunk_chars:
         return True
     if est is None:
@@ -94,12 +101,12 @@ def should_start(buffered_audio_s: float, remaining_chunk_chars: list[int],
         return False
     t_ready = 0.0                    # est render-completion time of chunk k
     t_needed = buffered_audio_s      # play head reaches chunk k at this time
-    for chars in remaining_chunk_chars:
-        audio = chars / cps
-        t_ready += rtf * audio
+    for item in remaining_chunk_chars:
+        kept, rendered = (item, item) if isinstance(item, int) else item
+        t_ready += rtf * (rendered / cps)
         if safety * t_ready > t_needed:
             return False
-        t_needed += audio
+        t_needed += kept / cps
     return True
 
 
@@ -127,9 +134,12 @@ def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict,
     # what each band trades away).
     banded = band is None
     if banded:
+        # Strict tuple check: mocked engines return truthy attributes.
+        eng_bands = getattr(engine, "STREAM_BANDS", None)
         band = chunking.band_for_rtf(
             perfstats.estimate_marginal(engine_name, mkey),
-            perfstats.band(engine_name, mkey))
+            perfstats.band(engine_name, mkey),
+            bands=eng_bands if isinstance(eng_bands, tuple) else None)
     # How style rows are chosen is per-engine. kitten's pack is indexed by
     # TEXT sentence length (stock-faithful per-run registers — Max's R16-1
     # verdict); kokoro's by PHONEME length with no sentence split, so its
@@ -302,9 +312,22 @@ def try_stream_single(
         while i in ready:
             buffered += ready[i]
             i += 1
-        remaining = [len(chunks[j]) for j in range(n) if j not in ready]
-        return should_start(buffered, remaining,
-                            perfstats.estimate(engine_name, mkey))
+        if plan is not None:
+            # Phoneme path: conditioning chars are known exactly, so the
+            # gate can budget rendered (kept + discarded) audio at the
+            # size-independent marginal rtf — see should_start.
+            remaining = [(len(chunks[j]),
+                          len(chunks[j]) + len(plan[j].context or "")
+                          + len(plan[j].lookahead or ""))
+                         for j in range(n) if j not in ready]
+        else:
+            remaining = [len(chunks[j]) for j in range(n) if j not in ready]
+        est = perfstats.estimate(engine_name, mkey)
+        if plan is not None and est is not None:
+            mrtf = perfstats.estimate_marginal(engine_name, mkey)
+            if mrtf is not None:
+                est = (mrtf, est[1])
+        return should_start(buffered, remaining, est)
 
     threading.Thread(target=_coordinate, daemon=True,
                      name="marmalade-stream-coord").start()

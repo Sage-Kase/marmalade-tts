@@ -289,38 +289,45 @@ def _band(entry) -> StreamBand:
     return StreamBand(entry[0], entry[2], entry[3], entry[4])
 
 
-def band_for_rtf(mrtf: "float | None",
-                 current: "str | None" = None) -> StreamBand:
+def band_for_rtf(mrtf: "float | None", current: "str | None" = None,
+                 bands: "tuple | None" = None) -> StreamBand:
     """Pick the chunk-size band for a measured marginal RTF.
 
     ``current`` is the band last used on this device; staying in it wins
     ties within ``BAND_HYSTERESIS`` of the edge. With no measurement yet,
-    the fast band is the optimistic default — the first render is the
+    the first band is the optimistic default — the first render is the
     first measurement, and a wrong guess costs a gap, never a failure.
+
+    ``bands`` substitutes an engine-declared table (same row format as
+    ``_STREAM_BANDS``): the shared table encodes KITTEN's measured cost
+    model, and an engine with a very different RTF/cps profile needs its
+    own edges and ramps (see ``KokoroEngine.STREAM_BANDS``).
     """
+    if bands is None:
+        bands = _STREAM_BANDS
     if mrtf is None:
-        return _band(_STREAM_BANDS[0])
-    for i, entry in enumerate(_STREAM_BANDS):
+        return _band(bands[0])
+    for i, entry in enumerate(bands):
         if mrtf <= entry[1]:
             chosen = i
             break
     else:  # pragma: no cover — the last band is unbounded
-        chosen = len(_STREAM_BANDS) - 1
-    if current is None or current == _STREAM_BANDS[chosen][0]:
-        return _band(_STREAM_BANDS[chosen])
-    names = [e[0] for e in _STREAM_BANDS]
+        chosen = len(bands) - 1
+    if current is None or current == bands[chosen][0]:
+        return _band(bands[chosen])
+    names = [e[0] for e in bands]
     if current not in names:
-        return _band(_STREAM_BANDS[chosen])
+        return _band(bands[chosen])
     cur = names.index(current)
     # Leaving a band needs the estimate to clear the relevant edge by the
     # hysteresis margin; otherwise stay put.
     if chosen > cur:
-        edge = _STREAM_BANDS[cur][1]
-        return _band(_STREAM_BANDS[chosen if mrtf > edge * (1 + BAND_HYSTERESIS)
-                                   else cur])
-    edge = _STREAM_BANDS[cur - 1][1]
-    return _band(_STREAM_BANDS[chosen if mrtf < edge * (1 - BAND_HYSTERESIS)
-                               else cur])
+        edge = bands[cur][1]
+        return _band(bands[chosen if mrtf > edge * (1 + BAND_HYSTERESIS)
+                           else cur])
+    edge = bands[cur - 1][1]
+    return _band(bands[chosen if mrtf < edge * (1 - BAND_HYSTERESIS)
+                       else cur])
 
 
 class PhPiece:

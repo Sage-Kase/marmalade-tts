@@ -165,6 +165,16 @@ class TestShouldStart:
         assert not should_start(10.0, [100] * 10, est)
         assert should_start(50.0, [100] * 10, est)
 
+    def test_conditioning_chars_are_paid_but_buy_no_playback(self):
+        # (kept, rendered) pairs: a chunk keeping 20 chars but rendering
+        # 40 (conditioning) is budgeted at 40 in t_ready, while only its
+        # kept 20 advance the play head. rtf 0.5, 10 chars/audio-s: the
+        # bare form passes (1.5*0.5*2s = 1.5 <= 2.0), the conditioned
+        # form correctly refuses (1.5*0.5*4s = 3.0 > 2.0).
+        est = (0.5, 10.0)
+        assert should_start(2.0, [20], est)
+        assert not should_start(2.0, [(20, 40)], est)
+
 
 # ── try_stream_single pipeline ───────────────────────────────────────────────
 
@@ -386,6 +396,18 @@ class TestPhonemeStream:
         rows = [kw["style_ref"] for _, kw in eng.ph_calls]
         assert rows == [len("wˈʌn wˈʌn wˈʌn.") - 1,
                         len("tˈuː tˈuː tˈuː.") - 1]
+
+    def test_engine_stream_bands_replace_the_shared_table(self, tmp_path):
+        # kokoro declares its own band table (different cost model); the
+        # plan's chunk sizes must follow the engine's ramp, not kitten's.
+        ph = " ".join(["wˈʌn"] * 40) + "."
+        eng = _fake_ph_engine(ph)
+        eng.STREAM_BANDS = (("fast", float("inf"), (25, 400), 2, 2),)
+        try_stream_single(
+            "word " * 40, str(tmp_path / "o.wav"),
+            engine=eng, engine_name="kokoro", play=lambda p: None, **_COMMON)
+        first = eng.ph_calls[0][0]
+        assert len(first) <= 25
 
     def test_inter_run_gap_lands_in_the_output(self, tmp_path):
         eng = _fake_ph_engine(PH_TWO_RUNS)

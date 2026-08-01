@@ -21,7 +21,7 @@ language is configured, that's what we use. Override order:
 import os
 
 from . import Engine, run_in_venv
-from .. import daemon as dmgr
+from .. import chunking, daemon as dmgr
 
 # marmalade-tts owns the install: kokoro lives in its own venv and is
 # invoked by explicit path, never via $PATH. A bare `kokoro` lookup would
@@ -103,9 +103,50 @@ def is_voice_token(token: str) -> bool:
     return token in ALL_VOICE_TOKENS
 
 
+# Chunk-size bands for the phoneme stream — kokoro-specific. The shared
+# table in chunking encodes KITTEN's cost model (marginal RTF ~0.09);
+# kokoro on a desktop CPU measures render_s = 0.032 + 0.334 × audio_s at
+# ~10-13 ph chars per audio second (2026-07-31, whole-utterance
+# register), which changes both calibrations:
+#
+#   * At this speed the playback GATE dominates time-to-first-audio, not
+#     the chunk-0 render. The gate budgets each remaining chunk at the
+#     EFFECTIVE rtf (render per kept second, conditioning included) —
+#     ~0.38-0.44 here, WORSE for small chunks since the ~0.25s
+#     conditioning render amortizes badly. Two consequences, both
+#     measured: small early chunks are self-defeating (a kitten-style
+#     30-char ramp measured 4.0s TTFA, the doubling moderate ramp 4.2s —
+#     both stall the gate waiting for extra chunks), while a LARGE first
+#     chunk banks the audio that makes every later deadline affordable
+#     and its own render is cheap (0.334/s). The dip after the first
+#     step (90 → 75) is deliberate: right after chunk 0 the banked slack
+#     is at its thinnest, so chunk 1 must stay small; slack then grows
+#     with every played second. The 150 cap bounds the worst mid-stream
+#     deadline (renders are sequential — one oversized late chunk can
+#     stall the whole gate). Shape found by simulating the real gate
+#     over the lab passages at the worst measured (mrtf, cps): it opens
+#     right after chunk 0 whenever the first sentence is long enough to
+#     bank ~4s; a passage OPENING with a short sentence (P8's 30-ch
+#     "The rain had stopped by morning.") legitimately waits one more
+#     chunk — 1.8s of banked audio cannot cover a 6s render at safety
+#     1.5, and no ramp can change what the first sentence is.
+#   * The kitten table's 0.35 "slow" edge would classify this desktop as
+#     slow and degrade conditioning to 2+1 — sanctioned (R14-1) ONLY for
+#     a device that can't hold streaming. Kokoro at 0.36 holds fine
+#     (sustained effective RTF ≈ 0.54); the slow band here starts where
+#     streaming genuinely struggles.
+STREAM_BANDS = (
+    ("fast", 0.50, (90, 75, 80, 100, 120, 140, 150),
+     chunking.CONTEXT_UNITS, chunking.LOOKAHEAD_UNITS),
+    ("slow", float("inf"), (90, 180, 320, 400),
+     chunking.CONTEXT_UNITS, chunking.SLOW_LOOKAHEAD_UNITS),
+)
+
+
 class KokoroEngine(Engine):
     name = "kokoro"
     MAX_CHARS = 500
+    STREAM_BANDS = STREAM_BANDS
 
     def __init__(self, cfg: dict):
         self.cfg = cfg
