@@ -96,17 +96,54 @@ def _extend_quiet(wav, s: int, e: int):
     return s, e
 
 
+def _frication(wav, lo: int, hi: int) -> bool:
+    """Does [lo, hi) look like frication? High zero-crossing rate at low-
+    to-mid energy — an /s ʃ f/ hovers under the silence threshold's energy
+    neighbourhood, which is exactly why the quiet-span machinery misjudges
+    it."""
+    n = hi - lo
+    if n <= 1:
+        return False
+    r2 = 0.0
+    crossings = 0
+    prev = float(wav[lo])
+    for i in range(lo, hi):
+        v = float(wav[i])
+        r2 += v * v
+        if (v < 0) != (prev < 0):
+            crossings += 1
+        prev = v
+    return crossings / n > 0.2 and (r2 / n) ** 0.5 > 0.002
+
+
+def _fricative_backoff(wav, cut: int, max_frames: int = 8) -> int:
+    """Walk a start cut backward across contiguous frication so an onset
+    fricative survives the cut. Measured failure (P10, 2026-07-31): on
+    the tight join "bˈæk, slˈOli" the model renders /s/ BEFORE a 7ms
+    closure gap, and the alignment boundary lands after it — the
+    quiet-span cut beheaded the /s/ and whisper heard "lowly". Walking
+    back over fricative-looking frames keeps it; at worst this duplicates
+    a sliver of the context word's release, and duplication beats loss
+    (round-3 precedent)."""
+    lo = max(0, cut - max_frames * FRAME)
+    t = cut
+    while t - FRAME >= lo and _frication(wav, t - FRAME, t):
+        t -= FRAME
+    return t
+
+
 def _context_cut(wav, approx: int) -> int:
     """Acoustic start cut for a context prefix: snap the alignment-derived
-    position to the word gap near it, backed off one frame into the gap so
-    the first kept word keeps its attack (onsets bleed into the space
-    frames before them). No credible gap nearby → the approximation is the
-    best available."""
+    position to the word gap near it, backed off two frames into the gap
+    (onsets bleed into the space frames before them; a soft onset can
+    start under the silence threshold), then walked back across any
+    frication butting the cut (see _fricative_backoff). No credible gap
+    nearby → the approximation is the best available."""
     s, e = _quiet_span(wav, approx - _CUT_SEARCH_BACK, approx + _CUT_SEARCH_FWD)
     if e - s < _MIN_GAP_SAMPLES:
-        return max(0, approx)
+        return _fricative_backoff(wav, max(0, approx))
     s, e = _extend_quiet(wav, s, e)
-    return max(s, e - FRAME)
+    return _fricative_backoff(wav, max(s, e - 2 * FRAME))
 
 
 def _lookahead_cut(wav, approx: int) -> int:

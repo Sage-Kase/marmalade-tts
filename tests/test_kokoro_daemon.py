@@ -56,12 +56,14 @@ def test_quiet_span_finds_longest_run():
 # ── conditioning cuts ───────────────────────────────────────────────────────
 
 def test_context_cut_snaps_to_gap_end_with_backoff():
-    # speech · 2-frame gap · speech; alignment says the text starts one
+    # speech · 3-frame gap · speech; alignment says the text starts one
     # frame INTO the kept speech (the measured late-boundary failure mode).
-    gap_s, gap_e = 5 * FRAME, 7 * FRAME
+    # Two frames of backoff: soft fricative onsets sit under the silence
+    # threshold, so the gap's found end can already be inside the word.
+    gap_s, gap_e = 5 * FRAME, 8 * FRAME
     wav = _wav((LOUD, gap_s), (QUIET, gap_e - gap_s), (LOUD, 5 * FRAME))
     cut = kokoro_daemon._context_cut(wav, gap_e + FRAME)
-    assert cut == gap_e - FRAME  # one frame back into the gap: onset kept
+    assert cut == gap_e - 2 * FRAME
 
 
 def test_context_cut_without_gap_returns_approx():
@@ -87,6 +89,48 @@ def test_lookahead_cut_short_gap_keeps_it_whole():
 def test_lookahead_cut_without_gap_returns_approx():
     wav = _wav((LOUD, 20 * FRAME))
     assert kokoro_daemon._lookahead_cut(wav, 10 * FRAME) == 10 * FRAME
+
+
+def _fric(n):
+    """Synthetic frication: alternating-sign low-amplitude samples."""
+    return [0.01 if i % 2 else -0.01 for i in range(n)]
+
+
+def test_fricative_backoff_rescues_onset_fricative():
+    # speech · gap · fricative butting the cut: the cut walks back across
+    # the frication (the P10 "slowly"→"lowly" fix).
+    wav = (_wav((LOUD, 5 * FRAME), (QUIET, 2 * FRAME))
+           + _fric(2 * FRAME) + _wav((LOUD, 5 * FRAME)))
+    cut = 9 * FRAME  # right after the frication
+    assert kokoro_daemon._fricative_backoff(wav, cut) == 7 * FRAME
+
+
+def test_fricative_backoff_stays_put_on_silence():
+    wav = _wav((LOUD, 5 * FRAME), (QUIET, 4 * FRAME), (LOUD, 5 * FRAME))
+    assert kokoro_daemon._fricative_backoff(wav, 8 * FRAME) == 8 * FRAME
+
+
+def test_fricative_backoff_stays_put_on_voiced():
+    # Voiced audio has low zero-crossing rate — never walked across.
+    wav = _wav((LOUD, 10 * FRAME))
+    assert kokoro_daemon._fricative_backoff(wav, 8 * FRAME) == 8 * FRAME
+
+
+def test_fricative_backoff_is_capped():
+    wav = _fric(30 * FRAME)
+    cut = 20 * FRAME
+    assert kokoro_daemon._fricative_backoff(wav, cut) == 12 * FRAME
+
+
+def test_context_cut_rescues_fricative_before_a_tiny_closure_gap():
+    # The measured P10 shape: /s/ frication, THEN a tiny closure gap,
+    # then the voiced onset — the snap lands at the gap (beheading the
+    # /s/) and the walk-back reclaims it.
+    tiny = 300  # 12.5ms — over _MIN_GAP_SAMPLES, under a real word gap
+    wav = (_wav((LOUD, 5 * FRAME)) + _fric(2 * FRAME)
+           + _wav((QUIET, tiny)) + _wav((LOUD, 5 * FRAME)))
+    cut = kokoro_daemon._context_cut(wav, 7 * FRAME + tiny)
+    assert cut == 5 * FRAME  # start of the frication, /s/ kept
 
 
 # ── pause top-ups ───────────────────────────────────────────────────────────
