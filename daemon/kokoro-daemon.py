@@ -45,6 +45,15 @@ _MIN_GAP_SAMPLES = 60     # 2.5ms — smallest quiet run worth snapping a cut to
 _CUT_SEARCH_BACK = 5 * FRAME
 _CUT_SEARCH_FWD = 3 * FRAME
 
+# A found gap is only credible if it abuts the alignment boundary. Two
+# fused words ("ðə mˈɑɹkət" — K1-4b P8 probe, 2026-08-01) render with NO
+# gap at their join; the window search then finds the PREVIOUS word's
+# pause 3+ frames away, and snapping to it replays the tail of the
+# context (a duplicated "the" at the seam) or truncates kept words on
+# the lookahead side. Farther than this → treat as no gap and cut at
+# the alignment boundary instead.
+_GAP_NEAR = 3 * FRAME
+
 # misaki keeps punctuation in its phoneme output; these (plus whitespace)
 # are the non-speech characters for group-walking and cut placement.
 _PUNCT_SET = set(';:,.!?¡¿—…"«»“” ')
@@ -143,6 +152,8 @@ def _context_cut(wav, approx: int) -> int:
     if e - s < _MIN_GAP_SAMPLES:
         return _fricative_backoff(wav, max(0, approx))
     s, e = _extend_quiet(wav, s, e)
+    if approx - e > _GAP_NEAR or s - approx > _GAP_NEAR:
+        return _fricative_backoff(wav, max(0, approx))
     return _fricative_backoff(wav, max(s, e - 2 * FRAME))
 
 
@@ -155,6 +166,8 @@ def _lookahead_cut(wav, approx: int) -> int:
     if e - s < _MIN_GAP_SAMPLES:
         return max(0, approx)
     s, e = _extend_quiet(wav, s, e)
+    if approx - e > _GAP_NEAR or s - approx > _GAP_NEAR:
+        return max(0, approx)
     return min(e, s + TAIL_KEEP * FRAME)
 
 

@@ -91,6 +91,25 @@ def test_lookahead_cut_without_gap_returns_approx():
     assert kokoro_daemon._lookahead_cut(wav, 10 * FRAME) == 10 * FRAME
 
 
+def test_context_cut_ignores_previous_words_gap():
+    # Fused join ("ðə mˈɑɹkət" — K1-4b P8): no gap at the boundary, but the
+    # PREVIOUS word gap sits inside the search window. Snapping to it would
+    # replay the whole context word after the seam; the cut must stay at
+    # the alignment boundary instead.
+    gap_s, gap_e = 5 * FRAME, 6 * FRAME
+    approx = gap_e + 4 * FRAME  # a full word between the gap and the boundary
+    wav = _wav((LOUD, gap_s), (QUIET, gap_e - gap_s), (LOUD, 10 * FRAME))
+    assert kokoro_daemon._context_cut(wav, approx) == approx
+
+
+def test_lookahead_cut_ignores_far_gap():
+    # Mirror image: a far-off earlier gap must not truncate kept words.
+    gap_s, gap_e = 5 * FRAME, 6 * FRAME
+    approx = gap_e + 4 * FRAME
+    wav = _wav((LOUD, gap_s), (QUIET, gap_e - gap_s), (LOUD, 10 * FRAME))
+    assert kokoro_daemon._lookahead_cut(wav, approx) == approx
+
+
 def _fric(n):
     """Synthetic frication: alternating-sign low-amplitude samples."""
     return [0.01 if i % 2 else -0.01 for i in range(n)]
