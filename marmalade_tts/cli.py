@@ -540,6 +540,15 @@ def _build_parser() -> argparse.ArgumentParser:
         description="🍊 Unified local TTS — kitten | kokoro | piper | coqui | pocket | matcha | emojivoice",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
+Subcommands (given as the first argument; init/install/uninstall take --help):
+  init       set up and install engines (--plain / --non-interactive for
+             screen readers and scripts)
+  install    add engines after init: install <engine>...
+  uninstall  remove engines: uninstall <engine> | --engines | --purge
+  config     config show | config get <key> | config set <key> <value>
+  daemon     daemon status | start | stop | start-all | stop-all [--engine E]
+  mcp        run the MCP server on stdio for AI agents
+
 Examples:
   marmalade-tts "Hello world"                    # uses default engine
   marmalade-tts kokoro "Hello world"             # specify engine

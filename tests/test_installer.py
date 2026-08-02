@@ -415,3 +415,51 @@ class TestInstallEngines:
             results = installer.install_engines(["kokoro"], interactive=False)
         assert len(results) == 1
         assert results[0]["engine"] == "kokoro"
+
+
+# ── Progress-bar suppression when stdout is not a TTY ────────────────────────
+
+class TestProgressBarSuppression:
+    def test_pip_install_quiet_when_not_a_tty(self):
+        from marmalade_tts import installer
+        with patch.object(installer, "_progress_bars_ok", return_value=False), \
+             patch.object(installer, "uv_bin", return_value="/bin/uv"), \
+             patch.object(installer, "_run") as run:
+            installer.uv_pip_install("/venv", ["numpy"])
+        assert "-q" in run.call_args.args[0]
+
+    def test_pip_install_keeps_progress_on_a_tty(self):
+        from marmalade_tts import installer
+        with patch.object(installer, "_progress_bars_ok", return_value=True), \
+             patch.object(installer, "uv_bin", return_value="/bin/uv"), \
+             patch.object(installer, "_run") as run:
+            installer.uv_pip_install("/venv", ["numpy"])
+        assert "-q" not in run.call_args.args[0]
+
+    def test_gdown_quiet_when_not_a_tty(self, tmp_path):
+        from marmalade_tts import installer
+        with patch.object(installer, "_progress_bars_ok", return_value=False), \
+             patch.object(installer, "uv_bin", return_value="/bin/uv"), \
+             patch.object(installer, "_run") as run:
+            with pytest.raises(RuntimeError):
+                installer._gdrive_download(
+                    {"filename": "missing.bin", "folder_id": "abc"},
+                    str(tmp_path / "out.bin"))
+        assert "-q" in run.call_args.args[0]
+
+    def test_warm_cache_disables_hf_progress_bars_when_not_a_tty(self, tmp_path):
+        from marmalade_tts import installer
+        recipe = {
+            "python": None, "venv": str(tmp_path / "v"), "pip": ["x"],
+            "pip_post": [], "system_deps": [], "models": None,
+            "warm_cache": "import x", "selftest_text": "hi",
+        }
+        with patch.dict(installer.INSTALL_RECIPES, {"kokoro": recipe}), \
+             patch.object(installer, "_progress_bars_ok", return_value=False), \
+             patch("marmalade_tts.installer.uv_venv"), \
+             patch("marmalade_tts.installer.uv_pip_install"), \
+             patch("marmalade_tts.installer.selftest", return_value=(True, "ok")), \
+             patch("marmalade_tts.installer._run") as run:
+            installer.install_engine("kokoro", interactive=False)
+        env = run.call_args.kwargs["env"]
+        assert env["HF_HUB_DISABLE_PROGRESS_BARS"] == "1"

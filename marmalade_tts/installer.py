@@ -180,6 +180,12 @@ def _run(cmd, **kwargs):
     return subprocess.run(cmd, **kwargs)
 
 
+def _progress_bars_ok() -> bool:
+    """Third-party progress bars redraw with \\r, which screen readers and
+    log files can't cope with. Only let them through on a real TTY."""
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+
 def uv_python_install(version: str):
     """Ensure a given Python version is available to uv."""
     _run([uv_bin(), "python", "install", version])
@@ -197,7 +203,11 @@ def uv_venv(venv_path: str, python: str = None):
 def uv_pip_install(venv_path: str, packages):
     """Install packages into venv_path with uv."""
     venv_python = os.path.join(venv_path, "bin", "python")
-    _run([uv_bin(), "pip", "install", "--python", venv_python, *packages])
+    cmd = [uv_bin(), "pip", "install", "--python", venv_python]
+    if not _progress_bars_ok():
+        cmd.append("-q")
+    cmd += list(packages)
+    _run(cmd)
 
 
 # ── System dependencies ──────────────────────────────────────────────────────
@@ -342,7 +352,11 @@ def _gdrive_download(src: dict, dest: str):
         print(f"[install]   fetching {src['filename']} from Google Drive via "
               f"gdown — the first run also installs gdown, this can take a while…")
         folder_url = f"https://drive.google.com/drive/folders/{src['folder_id']}"
-        _run([uv_bin(), "tool", "run", "gdown", "--folder", folder_url, "-O", tmp])
+        cmd = [uv_bin(), "tool", "run", "gdown", "--folder", folder_url, "-O", tmp]
+        if not _progress_bars_ok():
+            # gdown -q drops the progress bar but keeps errors.
+            cmd.append("-q")
+        _run(cmd)
         for root, _, files in os.walk(tmp):
             if src["filename"] in files:
                 shutil.move(os.path.join(root, src["filename"]), dest)
@@ -514,6 +528,8 @@ def install_engine(name: str, allow_sudo: bool = False, reinstall: bool = False,
             print(f"[install] {name}: warming model cache (first-run download)")
             venv_python = os.path.join(venv, "bin", "python")
             env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
+            if not _progress_bars_ok():
+                env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
             try:
                 _run([venv_python, "-c", recipe["warm_cache"]], env=env)
             except subprocess.CalledProcessError as e:

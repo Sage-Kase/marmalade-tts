@@ -172,6 +172,7 @@ expressivity knob, plus what each Coqui model honors), see
 ```sh
 # Interactive setup (arrow keys to pick engines, voices, model sizes)
 marmalade-tts init
+marmalade-tts init --plain     # numbered prompts instead (screen readers)
 
 # Non-interactive setup (for AI agents / scripts)
 marmalade-tts init --non-interactive --engines kitten,piper
@@ -609,6 +610,8 @@ marmalade-tts init --non-interactive --engines kitten,kokoro \
 
 Flags:
 - `--non-interactive` — skip TUI prompts (auto-enabled when stdin is not a TTY)
+- `--plain` — numbered text prompts instead of the arrow-key menus, for
+  screen readers and dumb terminals (implied by `NO_COLOR` or `TERM=dumb`)
 - `--engines LIST` — comma-separated engines to enable
 - `--set ENGINE.KEY=VALUE` — override engine options (repeatable)
 - `--default-engine NAME` — set the default engine
@@ -806,6 +809,11 @@ aplay "$WAV"
 marmalade-tts --json --no-play "Hello"
 # → {"ok": true, "version": "0.5.0", "engine": "kitten", "voice": "Kiki",
 #    "out": "/tmp/...", "effects": [], "text": "Hello", "duration": 0.84}
+
+# JSON listings — voices, effects and aliases as machine-readable data
+marmalade-tts kokoro --list --json
+marmalade-tts --list-effects --json
+marmalade-tts --list-aliases --json
 
 # Never play back, just generate
 marmalade-tts --no-play --out result.wav "Generate but don't play"
