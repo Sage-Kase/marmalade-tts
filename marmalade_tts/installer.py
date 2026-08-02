@@ -65,7 +65,10 @@ INSTALL_RECIPES = {
     "kokoro": {
         "python": None,
         "venv": "~/.local/share/kokoro-venv",
-        "pip": ["kokoro", "soundfile"],
+        # misaki[ja,zh] pulls the G2P front ends for the shipped Japanese
+        # and Mandarin voices (pyopenjtalk, jieba, …); without them those
+        # voices fail at synthesis time with an import error.
+        "pip": ["kokoro", "misaki[ja,zh]", "soundfile"],
         "pip_post": [],
         "system_deps": [],
         "models": None,  # auto-downloads from HuggingFace
