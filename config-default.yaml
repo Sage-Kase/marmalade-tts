@@ -50,7 +50,8 @@ engines:
   kokoro:
     device: cpu
     voice: af_heart
-    lang: a
+    # lang: a              # force one G2P language for every voice; unset,
+                           # each voice speaks its natural language (a/b/j/z)
     daemon: false          # set true to keep kokoro model in RAM (uses ~1.4 GB)
 
   piper:

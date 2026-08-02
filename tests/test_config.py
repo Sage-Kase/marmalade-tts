@@ -243,6 +243,13 @@ class TestDefaultConfig:
         assert cfg["engines"]["emojivoice"]["voice"] == "paige"
         assert cfg["engines"]["emojivoice"]["device"] == "cpu"
 
+    def test_kokoro_has_no_lang_default(self):
+        # A kokoro lang in DEFAULT_CONFIG deep-merges above every voice's
+        # natural language, silently forcing American G2P onto British/
+        # Japanese/Mandarin voices. init.py deliberately writes no lang;
+        # the defaults layer must not re-add one.
+        assert "lang" not in cfg_mod.DEFAULT_CONFIG["engines"]["kokoro"]
+
     def test_matcha_and_emojivoice_in_presets(self):
         cfg = cfg_mod.DEFAULT_CONFIG
         for preset in ["fast", "balanced", "quality"]:

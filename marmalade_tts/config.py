@@ -31,7 +31,10 @@ DEFAULT_CONFIG = {
         "kokoro": {
             "device": "cpu",
             "voice": "af_heart",
-            "lang": "a",
+            # No 'lang' default: each voice's natural language applies
+            # unless the user sets one here or passes --lang. A default
+            # here would override the natural language for every voice
+            # (deep-merge puts it above natural_lang in _resolve_lang).
             "daemon": False,
         },
         "piper": {
