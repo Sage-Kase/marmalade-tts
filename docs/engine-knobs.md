@@ -28,6 +28,13 @@ no native knob and falls back to sox post-processing. See
 [ENGINE-GUIDE.md § Honoring --speed](../ENGINE-GUIDE.md#honoring---speed-required)
 for the rule and how new engines must implement it.
 
+**`--lang` contract:** only kokoro (misaki letter codes) and coqui (IETF
+codes, multilingual models) take a language setting — engine classes
+declare this via `SUPPORTS_LANG`. For every other engine the language is
+a property of the voice/model (piper encodes it in the voice file;
+kitten/pocket/matcha/emojivoice are English-only), so `--lang` there
+prints a stderr warning and is dropped rather than silently ignored.
+
 ---
 
 ## kitten
@@ -37,7 +44,7 @@ Fast, lightweight, English-only. 8 voices, 3 model sizes.
 | Knob       | CLI       | Config key                   | Default | Notes                                  |
 |------------|-----------|------------------------------|---------|----------------------------------------|
 | voice      | positional / `--voice` | `engines.kitten.voice`       | `Kiki`  | One of: Bella, Jasper, Luna, Bruno, Rosie, Hugo, Kiki, Leo |
-| model_size | —         | `engines.kitten.model_size`  | `micro` | `nano` (~23MB), `micro` (~41MB), `mini` (~80MB) |
+| model_size | —         | `engines.kitten.model_size`  | `nano`  | `nano` (~23MB), `micro` (~41MB), `mini` (~80MB) |
 
 ```bash
 marmalade-tts kitten Hugo "Hello"
@@ -56,7 +63,10 @@ High quality, multilingual (English, Japanese, Mandarin). 14 voices.
 | lang   | `--lang`    | `engines.kokoro.lang`  | voice's natural language | `a`/`b`/`j`/`z` (American/British/Japanese/Mandarin) |
 
 Voice and language are orthogonal — `george` (British male) can speak
-Japanese with `--lang j` for an accent effect.
+Japanese with `--lang j` for an accent effect. The kokoro daemon serves
+every language from one loaded model (`KOKORO_LANG` only picks which G2P
+front end is pre-warmed at startup), so no restart is needed to switch —
+the single-loaded-model daemon caveat below does not apply here.
 
 ```bash
 marmalade-tts kokoro george "Hello"

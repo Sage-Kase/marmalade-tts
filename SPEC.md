@@ -91,7 +91,10 @@ Options:
 - `--play` — force playback even when --out is set
 - `--speed FLOAT` — speech speed multiplier (default: 1.0)
 - `--voice NAME` — explicit voice override (alternative to positional)
-- `--lang CODE` — language code (kokoro only: a/b/h/e/f/i/p/j/z)
+- `--lang CODE` — language code. Kokoro: single-letter misaki codes
+  (`a`/`b`/`j`/`z` have shipped voices; unset = the voice's natural
+  language). Coqui multilingual models: IETF codes (`en`, `es`, …).
+  Other engines ignore it and the CLI says so on stderr.
 - `--speaker ID` — speaker id (piper multi-speaker models; matcha_vctk 0-107)
 - `--fast` — use fast preset (smallest/fastest models)
 - `--balanced` — use balanced preset
@@ -201,7 +204,8 @@ engines:
   kokoro:
     device: cpu
     voice: heart            # bare name (canonical af_heart also accepted)
-    lang: a                # a=US-EN, b=UK-EN, j=Japanese, z=Mandarin, etc.
+    # lang: a              # optional — unset, each voice speaks its natural
+                           # language (a=US-EN, b=UK-EN, j=Japanese, z=Mandarin)
     daemon: false
     # voices (American EN): heart, bella, nicole, adam, michael
     # voices (British EN):  emma, isabella, george, lewis

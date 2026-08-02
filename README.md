@@ -214,7 +214,7 @@ marmalade-tts piper --voice ~/voices/en_US-lessac-medium.onnx "Hello"
 marmalade-tts kokoro "Hello"
 marmalade-tts kokoro george "Hello"               # British male, positional
 marmalade-tts kokoro nicole "Hello"               # American female
-marmalade-tts kokoro alpha "Hello" --lang a       # Japanese voice, English accent
+marmalade-tts kokoro alpha "Hello" --lang a       # Japanese voice, American G2P (accent effect)
 marmalade-tts kokoro --list                       # show all voices
 ```
 
@@ -342,7 +342,9 @@ API key; keep a local engine configured as your offline fallback.
 ## Voice aliases / personas
 
 Define named bundles in your config and invoke them positionally like an
-engine name. Handy for recurring characters or styles:
+engine name. Handy for recurring characters or styles. An alias can carry
+any synth knob — `engine`, `voice`, `speed`, `lang`, `speaker`,
+`speaker_wav`, `emotion`, `effects`:
 
 ```yaml
 # ~/.config/marmalade-tts/config.yaml
