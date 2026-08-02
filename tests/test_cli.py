@@ -240,6 +240,33 @@ def test_completion_bash_piper_voice_uses_file_completion(capsys):
     assert "piper)      _filedir onnx" in out
 
 
+def test_completion_bash_lang_is_engine_aware(capsys):
+    """--lang values must be per-engine, not kokoro's letters for everyone."""
+    with patch("sys.argv", ["marmalade-tts", "--completion", "bash"]):
+        main()
+    out = capsys.readouterr().out
+    # coqui gets the XTTS v2 IETF tags.
+    assert 'local coqui_langs="en es fr de it pt pl tr ru nl cs ar zh-cn ja hu ko hi"' in out
+    # kokoro's single-letter codes are gated on the kokoro engine.
+    assert 'local kokoro_langs="a b j z"' in out
+    assert 'kokoro)     COMPREPLY=( $(compgen -W "$kokoro_langs" -- "$cur") ) ;;' in out
+    assert 'coqui)      COMPREPLY=( $(compgen -W "$coqui_langs" -- "$cur") ) ;;' in out
+    # The old unconditional letter list must be gone.
+    assert 'compgen -W "a b j z"' not in out
+
+
+def test_completion_zsh_lang_is_engine_aware(capsys):
+    """zsh --lang routes through a state so it can branch on the engine."""
+    with patch("sys.argv", ["marmalade-tts", "--completion", "zsh"]):
+        main()
+    out = capsys.readouterr().out
+    assert "'--lang[Language code]:lang:->langflag'" in out
+    assert "_marmalade_langs" in out
+    assert "local -a coqui_langs=(en es fr de it pt pl tr ru nl cs ar zh-cn ja hu ko hi)" in out
+    assert "local -a kokoro_langs=(a b j z)" in out
+    assert "(a b j z)'" not in out  # no unconditional inline letter list
+
+
 def test_completion_zsh(capsys):
     with patch("sys.argv", ["marmalade-tts", "--completion", "zsh"]):
         main()

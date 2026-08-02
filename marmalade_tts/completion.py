@@ -48,6 +48,13 @@ CONFIG_PATHS = [
     "presets.fast.api", "presets.balanced.api", "presets.quality.api",
 ]
 EFFECT_NAMES = list(EFFECTS.keys()) + list(BUILTIN_PRESETS.keys())
+# --lang values are engine-specific: kokoro uses single-letter misaki codes,
+# coqui XTTS v2 uses IETF tags. Other engines ignore --lang entirely.
+KOKORO_LANGS = ["a", "b", "j", "z"]
+COQUI_LANGS = [
+    "en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl", "cs", "ar",
+    "zh-cn", "ja", "hu", "ko", "hi",
+]
 
 
 def _alias_names() -> list:
@@ -76,6 +83,8 @@ def bash_completion() -> str:
     uninstall_flags = " ".join(UNINSTALL_FLAGS)
     config_paths = " ".join(CONFIG_PATHS)
     effect_names = " ".join(EFFECT_NAMES)
+    kokoro_langs = " ".join(KOKORO_LANGS)
+    coqui_langs = " ".join(COQUI_LANGS)
 
     return f'''# marmalade-tts bash completion
 # Add to .bashrc:  eval "$(marmalade-tts --completion bash)"
@@ -98,6 +107,8 @@ _marmalade_tts() {{
     local uninstall_flags="{uninstall_flags}"
     local config_paths="{config_paths}"
     local effect_names="{effect_names}"
+    local kokoro_langs="{kokoro_langs}"
+    local coqui_langs="{coqui_langs}"
     local flags="--out --out-dir --srt --vtt --play --no-play --speed --voice --lang --speaker \\
                  --speaker-wav --emotion \\
                  --fast --balanced --quality \\
@@ -181,9 +192,14 @@ _marmalade_tts() {{
         return
     fi
 
-    # --lang flag values
+    # --lang flag values — engine-specific.
+    # kokoro: single-letter misaki codes. coqui: IETF tags accepted by XTTS v2.
+    # Other engines ignore --lang, so offer nothing.
     if [[ "$prev" == "--lang" ]]; then
-        COMPREPLY=( $(compgen -W "a b j z" -- "$cur") )
+        case "${{words[1]}}" in
+            kokoro)     COMPREPLY=( $(compgen -W "$kokoro_langs" -- "$cur") ) ;;
+            coqui)      COMPREPLY=( $(compgen -W "$coqui_langs" -- "$cur") ) ;;
+        esac
         return
     fi
 
@@ -229,6 +245,8 @@ def zsh_completion() -> str:
     emojivoice_voices = " ".join(EMOJIVOICE_VOICES)
     api_voices = " ".join(API_VOICES)
     effect_names = " ".join(EFFECT_NAMES)
+    kokoro_langs = " ".join(KOKORO_LANGS)
+    coqui_langs = " ".join(COQUI_LANGS)
 
     return f'''#compdef marmalade-tts
 # marmalade-tts zsh completion
@@ -245,6 +263,8 @@ _marmalade-tts() {{
     local -a emojivoice_voices=({emojivoice_voices})
     local -a api_voices=({api_voices})
     local -a effect_names=({effect_names})
+    local -a kokoro_langs=({kokoro_langs})
+    local -a coqui_langs=({coqui_langs})
 
     # Engine-aware voice completion, shared by the positional voice slot
     # and the --voice flag. Reads $words[2] (the engine) to decide.
@@ -257,6 +277,16 @@ _marmalade-tts() {{
             api)        _values 'api voice' $api_voices ;;
             piper)      _files -g '*.onnx' ;;
             *) ;;  # coqui / matcha: model specs — no practical completion
+        esac
+    }}
+
+    # Engine-aware --lang completion. kokoro uses single-letter misaki codes,
+    # coqui XTTS v2 uses IETF tags; other engines ignore --lang.
+    _marmalade_langs() {{
+        case "${{words[2]}}" in
+            kokoro)     _values 'kokoro lang' $kokoro_langs ;;
+            coqui)      _values 'coqui language' $coqui_langs ;;
+            *) ;;
         esac
     }}
 
@@ -277,7 +307,7 @@ _marmalade-tts() {{
         '(-t --text)'{{-t,--text}}'[Text to synthesize]:text:' \\
         '--speed[Speech speed]:speed:' \\
         '--voice[Voice/model override]:voice:->voiceflag' \\
-        '--lang[Language code]:lang:(a b j z)' \\
+        '--lang[Language code]:lang:->langflag' \\
         '--speaker[Speaker ID or name]:id:' \\
         '--speaker-wav[Reference WAV for voice cloning (Coqui XTTS)]:file:_files' \\
         '--emotion[Emotion label (Coqui emotion-aware models)]:emotion:' \\
@@ -306,6 +336,9 @@ _marmalade-tts() {{
             ;;
         voiceflag)
             _marmalade_voices
+            ;;
+        langflag)
+            _marmalade_langs
             ;;
     esac
 }}
