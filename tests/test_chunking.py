@@ -531,12 +531,40 @@ class TestPhPack:
 
     def test_clause_mark_before_a_quote_is_not_a_boundary(self):
         # The dialogue comma before a quotation was the one seam Max
-        # singled out as audible (2026-07-29).
-        run = 'wˈʌnwˈʌn ' * 5 + 'sˈɛd, {}hˈɛloʊ,'
+        # singled out as audible (2026-07-29). (The tail is kept above
+        # _RUNT_TAIL so the runt merge can't hide the distinction.)
+        run = 'wˈʌnwˈʌn ' * 5 + 'sˈɛd, {}hˈɛloʊ hˈɛloʊ hˈɛloʊ,'
         # Same run, same lengths: a comma before a plain word closes the
         # chunk; the same comma before an opening quote does not.
         assert len(ph_pack(run.format(""), max_chars=500)) == 2
         assert len(ph_pack(run.format('"'), max_chars=500)) == 1
+
+    def test_overflow_reaches_for_a_nearby_mark(self):
+        # K1-5: a clause-mark word within WHOLE_TOL of the target wins
+        # over a word-gap cut at the target — mark seams sit in rendered
+        # pauses. 8-char words, ramp target 60: overflow at word 7 (62),
+        # but the comma-word right after is within reach (72 <= 81).
+        words = ["wˈʌnwˈʌn"] * 7 + ["tˈuːtˈuː,"] + ["θɹˈiːθɹˈiː"] * 4
+        pieces = ph_pack(" ".join(words), max_chars=500)
+        assert pieces[0].endswith(",")
+
+    def test_never_ends_a_chunk_on_unstressed_units(self):
+        # K1-4b: function words cliticize onto the NEXT word — a cut
+        # after "æz ðə" strands them ("as the | market"). The close backs
+        # off so they start the next chunk instead. Overflow lands on the
+        # first 12-char word with the buffer ending "... æz ðə" (50).
+        words = ["wˈʌnwˈʌn"] * 5 + ["æz", "ðə"] + ["mˈɑɹkətmˌɑɹk"] * 4
+        pieces = ph_pack(" ".join(words), max_chars=500)
+        assert not pieces[0].endswith("ðə")
+        assert pieces[1].startswith("æz ðə")
+
+    def test_runt_tail_merges_back(self):
+        # K1-4b: a tiny final piece isn't worth a seam when its
+        # predecessor can absorb it within tolerance.
+        run = "wˈʌnwˈʌn " * 6 + "ðə ʃˈælOz."
+        pieces = ph_pack(run.strip(), max_chars=500)
+        assert pieces[-1].endswith("ʃˈælOz.")
+        assert len(pieces) == 1 or len(pieces[-1]) >= 16
 
 
 class TestPhStreamPlan:

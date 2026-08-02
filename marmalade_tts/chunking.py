@@ -222,7 +222,20 @@ SLOW_LOOKAHEAD_UNITS = 1  # R14-1: the sanctioned degraded depth (2+1)
 # A chunk may end early on a clause mark once it is at least this fraction
 # of the size target — clause ends are the nicest seams, but never at the
 # cost of a chunk far below target (which would cost render overhead).
-_CLAUSE_CLOSE_AT = 0.75
+# 0.75 skipped P3's semicolons — the one boundary kokoro pauses at — and
+# forced a word-gap cut through "turned hard" instead (Max's K1-4b flag);
+# 0.5 puts the seams on marks. 0.35 was tried and REVERTED: many small
+# clause chunks each drain the playback gate's budget (P3 TTFA 2.28s).
+_CLAUSE_CLOSE_AT = 0.5
+
+# Placement rules from the K1-4b/K1-5 listening rounds (2026-08-01):
+_PH_STRESS = ("ˈ", "ˌ")  # misaki/espeak stress marks — a unit with neither
+                         # is an unstressed function word
+# A chunk may overshoot its target by this factor to reach a clause-mark
+# seam (or, in ph_stream_plan, to keep a whole sentence in one chunk).
+WHOLE_TOL = 1.35
+_MARK_REACH = 3   # how many words ahead to look for that mark
+_RUNT_TAIL = 16   # a final piece under this many chars merges back
 
 
 # ── Chunk-size bands ────────────────────────────────────────────────────────
@@ -395,26 +408,81 @@ def ph_pack(run: str, max_chars: int, step: int = 0,
 
     Word-gap cuts inside a sentence were rejected in round 1 and accepted
     in round 7 once seams were trimmed and conditioned both ways (C2/D2) —
-    chunk size is a performance knob now, not a quality one.
+    chunk size is a performance knob now, not a quality one. Placement
+    still matters (K1-4b/K1-5, Max's listens): three rules below decide
+    WHERE the legal cuts land.
+
+    * Reach for the mark: on overflow, if a clause-mark word lies within
+      WHOLE_TOL of the target, run on to the mark instead of cutting at
+      a word gap (a mark seam sits in a rendered pause; a word-gap seam
+      may land in coarticulated voiced audio — "turned | hard").
+    * Never end a chunk on unstressed units: function words cliticize
+      onto the NEXT word, so cutting after them splits a spoken unit
+      ("as the | market" → "cobblestones | as the market").
+    * Runt tails merge back: a final piece under _RUNT_TAIL chars is not
+      worth a seam if its predecessor can absorb it within tolerance.
     """
     words = run.split()
     out: list[str] = []
-    cur = ""
+    cur: list[str] = []
+
+    def _stressed(w):
+        return any(m in w for m in _PH_STRESS)
+
+    def close():
+        # Back the cut off before any trailing unstressed run — provided
+        # a stressed unit remains and the tail doesn't end a clause.
+        k = len(cur)
+        while (k > 1 and not _stressed(cur[k - 1])
+                and cur[k - 1][-1] not in ";:,"):
+            k -= 1
+        if any(_stressed(w) for w in cur[:k]):
+            out.append(" ".join(cur[:k]))
+            rest = cur[k:]
+        else:
+            out.append(" ".join(cur))
+            rest = []
+        cur.clear()
+        cur.extend(rest)
+
+    def mark_within_reach(i, target):
+        cap = min(target * WHOLE_TOL, max_chars)
+        total = len(" ".join(cur + [words[i]]))
+        for j in range(i, min(i + _MARK_REACH, len(words))):
+            if j > i:
+                total += 1 + len(words[j])
+            if total > cap:
+                return False
+            core = words[j].rstrip('"”’\'')
+            nxt = words[j + 1] if j + 1 < len(words) else None
+            if (core and core[-1] in ";:,.!?"
+                    and not (nxt and nxt[0] in '"“\'')):
+                return True
+        return False
+
     for i, w in enumerate(words):
         target = min(ramp[min(step + len(out), len(ramp) - 1)], max_chars)
-        cand = (cur + " " + w) if cur else w
-        if cur and len(cand) > target:
-            out.append(cur)
-            cur = w
-            continue
-        cur = cand
-        if (len(cur) >= _CLAUSE_CLOSE_AT * target
-                and _ends_clause(w, words[i + 1] if i + 1 < len(words) else None)):
-            out.append(cur)
-            cur = ""
+        cand = len(" ".join(cur + [w]))
+        if cur and cand > target and not mark_within_reach(i, target):
+            close()
+        cur.append(w)
+        if (len(" ".join(cur)) >= _CLAUSE_CLOSE_AT * target
+                and _ends_clause(w, words[i + 1] if i + 1 < len(words)
+                                 else None)):
+            out.append(" ".join(cur))
+            cur.clear()
     if cur:
-        out.append(cur)
-    return out or [run]
+        close()
+        if cur:
+            out.append(" ".join(cur))
+    subs = [s for s in out if s] or [run]
+    if len(subs) >= 2 and len(subs[-1]) < _RUNT_TAIL:
+        t_prev = min(ramp[min(step + len(subs) - 2, len(ramp) - 1)],
+                     max_chars)
+        merged = subs[-2] + " " + subs[-1]
+        if len(merged) <= WHOLE_TOL * t_prev:
+            subs[-2:] = [merged]
+    return subs
 
 
 def _run_style_refs(ph: str, ph_runs: list[str], text: str) -> list[int]:
