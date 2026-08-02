@@ -1,11 +1,27 @@
 """Piper TTS engine — daemon client with subprocess fallback."""
 
 import os
+import re
 
 from . import Engine, EngineError, run_in_venv
 from .. import daemon as dmgr
 
 PIPER_VOICES_DIR = os.path.expanduser("~/.local/share/piper/voices")
+
+# Piper voice files are named "<lang>_<REGION>-<name>-<quality>.onnx", e.g.
+# "en_US-lessac-medium" or "fa_IR-amir-medium". The region is required —
+# without it a plain "my-custom-voice.onnx" would parse as Burmese.
+_LOCALE_RE = re.compile(r"^([a-z]{2,3}_[A-Z]{2})-")
+
+
+def locale_from_stem(stem: str) -> str | None:
+    """Return the locale embedded in a Piper voice filename stem, or None.
+
+    ``"en_US-lessac-medium"`` → ``"en_US"``. Filenames that don't follow
+    Piper's naming convention yield None so callers can leave them as-is.
+    """
+    m = _LOCALE_RE.match(stem)
+    return m.group(1) if m else None
 
 # marmalade-tts owns the install: piper lives in its own venv and is
 # invoked by explicit path, never via $PATH. An explicit venv path makes
@@ -98,7 +114,9 @@ class PiperEngine(Engine):
             for root, _, files in os.walk(PIPER_VOICES_DIR):
                 for f in files:
                     if f.endswith(".onnx"):
-                        print(f"  {os.path.join(root, f)}")
+                        loc = locale_from_stem(f[: -len(".onnx")])
+                        suffix = f"  [{loc}]" if loc else ""
+                        print(f"  {os.path.join(root, f)}{suffix}")
                         found = True
         if not found:
             print("  (no voices downloaded)")

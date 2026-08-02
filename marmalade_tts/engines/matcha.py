@@ -116,6 +116,7 @@ class MatchaEngine(Engine):
         run_in_venv(VENV_PYTHON, cmd, env_extra=env_extra, engine_name="matcha")
 
     def list_voices(self):
+        print("Language: English only (en)")
         print("Matcha-TTS models (auto-download on first use):")
         for m in MODELS:
             marker = " (default)" if m == self.model else ""

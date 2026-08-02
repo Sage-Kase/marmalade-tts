@@ -173,6 +173,7 @@ class EmojiVoiceEngine(Engine):
         run_in_venv(VENV_PYTHON, cmd, env_extra=env_extra, engine_name="emojivoice")
 
     def list_voices(self):
+        print("Language: English only (en)")
         print("EmojiVoice speakers:")
         for v in VOICES:
             marker = " (default)" if v == self.voice else ""

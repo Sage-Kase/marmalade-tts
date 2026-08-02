@@ -93,6 +93,7 @@ class PocketEngine(Engine):
         sox_tempo(out_path, speed)
 
     def list_voices(self):
+        print("Language: English only (en)")
         print("Pocket TTS voices (built-in):")
         for v in VOICES:
             marker = " (default)" if v == self.voice else ""

@@ -108,6 +108,11 @@ class CoquiEngine(Engine):
         run_in_venv(COQUI_BIN, cmd, env_extra=env_extra, engine_name="coqui")
 
     def list_voices(self):
+        print("Language: depends on the selected model — the model name carries "
+              "its language (e.g. tts_models/en/...).")
+        print("Multilingual models (e.g. XTTS v2) take --lang with an IETF "
+              "code, e.g. --lang en, --lang fr.")
+        print()
         if os.path.exists(COQUI_BIN):
             subprocess.run([COQUI_BIN, "--list_models"])
         else:

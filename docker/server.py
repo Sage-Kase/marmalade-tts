@@ -163,6 +163,8 @@ def validate_voice_name(name: str) -> str:
 # ── Voice discovery ────────────────────────────────────────────────────────────
 def discover_voices() -> list[dict]:
     """Scan ALLOWED_VOICE_DIRS for .onnx files and return voice metadata."""
+    from marmalade_tts.engines.piper import locale_from_stem
+
     voices = []
     seen = set()
     for voice_dir in ALLOWED_VOICE_DIRS:
@@ -173,12 +175,16 @@ def discover_voices() -> list[dict]:
             if stem in seen:
                 continue
             seen.add(stem)
+            labels = {"engine": "piper"}
+            locale = locale_from_stem(stem)
+            if locale:
+                labels["language"] = locale
             voices.append(
                 {
                     "voice_id": stem,
                     "name": stem,
                     "category": "premade",
-                    "labels": {"engine": "piper"},
+                    "labels": labels,
                     "description": f"Piper voice: {stem}",
                     "preview_url": None,
                     "available_for_tiers": [],

@@ -113,6 +113,7 @@ class KittenEngine(Engine):
         dmgr.synthesize("kitten", request, auto_start=True)
 
     def list_voices(self):
+        print("Language: English only (en)")
         print(f"Kitten TTS voices: {', '.join(VOICES)}")
         print("Model sizes: nano (~23MB)  micro (~41MB)  mini (~80MB)")
         for size, repo in MODEL_REPOS.items():

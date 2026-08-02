@@ -29,6 +29,44 @@ class TestPiperStructure:
         assert eng.noise_w_scale is None
 
 
+class TestPiperLocaleFromStem:
+    """Piper voice filenames embed the locale — `--list` and the HTTP
+    server's voice listing both parse it out of the stem."""
+
+    @pytest.mark.parametrize("stem,expected", [
+        ("en_US-lessac-medium", "en_US"),
+        ("en_GB-alba-medium", "en_GB"),
+        ("fa_IR-amir-medium", "fa_IR"),
+        ("zh_CN-huayan-x_low", "zh_CN"),
+        ("ca_ES-upc_ona-medium", "ca_ES"),
+    ])
+    def test_parses_locale_prefix(self, stem, expected):
+        from marmalade_tts.engines.piper import locale_from_stem
+        assert locale_from_stem(stem) == expected
+
+    @pytest.mark.parametrize("stem", [
+        "my-custom-voice",       # no locale prefix
+        "model",                 # no dashes at all
+        "EN_US-lessac-medium",   # wrong case for the language subtag
+        "",
+    ])
+    def test_non_conforming_names_yield_none(self, stem):
+        from marmalade_tts.engines.piper import locale_from_stem
+        assert locale_from_stem(stem) is None
+
+    def test_list_voices_shows_locale(self, tmp_path, capsys):
+        from marmalade_tts.engines import piper
+        (tmp_path / "en_US-lessac-medium.onnx").write_bytes(b"")
+        (tmp_path / "custom.onnx").write_bytes(b"")
+        with patch.object(piper, "PIPER_VOICES_DIR", str(tmp_path)):
+            piper.PiperEngine({}).list_voices()
+        out = capsys.readouterr().out
+        assert "[en_US]" in out
+        # A non-conforming filename is listed unannotated, not dropped.
+        assert "custom.onnx" in out
+        assert "custom.onnx  [" not in out
+
+
 def _mock_subprocess():
     # The venv check + run now live in the shared engines.run_in_venv helper,
     # so patch there. (Piper's _find_model still uses piper.os, but these
