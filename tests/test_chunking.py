@@ -567,6 +567,15 @@ class TestPhPack:
         assert not pieces[0].endswith("ðə")
         assert pieces[1].startswith("æz ðə")
 
+    def test_whole_run_tolerance_in_stream_plan(self):
+        # K1-4b: a sentence up to WHOLE_TOL x the ramp target stays one
+        # piece — sentence ends are free boundaries; a modest overshoot
+        # beats a conditioned mid-sentence cut. 72 chars vs target 60.
+        run = " ".join(["wˈʌnwˈʌn"] * 8) + "."
+        plan = ph_stream_plan(run, max_chars=500, keep_marks=".!?")
+        assert len(plan) == 1
+        assert plan[0].text == run
+
     def test_runt_tail_merges_back(self):
         # K1-4b: a tiny final piece isn't worth a seam when its
         # predecessor can absorb it within tolerance.

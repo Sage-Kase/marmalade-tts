@@ -543,7 +543,16 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
         rows = [None] * len(runs)
     pieces: list[PhPiece] = []
     for ri, run in enumerate(runs):
-        subs = ph_pack(run, max_chars, step=len(pieces), ramp=band.ramp)
+        # A sentence within WHOLE_TOL of its ramp target stays whole
+        # (K1-4b): a sentence end is a free unconditioned boundary with
+        # the approved seam sound, so a modest overshoot beats cutting
+        # into the sentence. The 35 floor keeps short-sentence openers
+        # whole even at small early targets.
+        t = band.ramp[min(len(pieces), len(band.ramp) - 1)]
+        if len(run) <= min(max(t * WHOLE_TOL, 35), max_chars):
+            subs = [run]
+        else:
+            subs = ph_pack(run, max_chars, step=len(pieces), ramp=band.ramp)
         last_run = ri == len(runs) - 1
         for i, s in enumerate(subs):
             last_sub = i == len(subs) - 1
