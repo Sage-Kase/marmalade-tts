@@ -289,20 +289,31 @@ BAND_HYSTERESIS = 0.15
 
 
 class StreamBand:
-    __slots__ = ("name", "ramp", "context_units", "lookahead_units")
+    """``long_start`` is an alternate ramp for packing the utterance's
+    FIRST run (optional 6th band-table column): a mid-sentence chunk 0
+    banks speech-only audio — no trailing pause, no inter-run gap — so
+    the playback gate needs a bigger opening buffer than a sentence-
+    final chunk 0 provides for free (K1-4b: 44 left later deadlines
+    short by a hair; 56 opened the gate)."""
 
-    def __init__(self, name, ramp, context_units, lookahead_units):
+    __slots__ = ("name", "ramp", "context_units", "lookahead_units",
+                 "long_start")
+
+    def __init__(self, name, ramp, context_units, lookahead_units,
+                 long_start=None):
         self.name = name
         self.ramp = ramp
         self.context_units = context_units
         self.lookahead_units = lookahead_units
+        self.long_start = long_start
 
     def __repr__(self):
         return f"StreamBand({self.name!r}, {self.ramp!r})"
 
 
 def _band(entry) -> StreamBand:
-    return StreamBand(entry[0], entry[2], entry[3], entry[4])
+    return StreamBand(entry[0], entry[2], entry[3], entry[4],
+                      entry[5] if len(entry) > 5 else None)
 
 
 def band_for_rtf(mrtf: "float | None", current: "str | None" = None,
@@ -608,7 +619,9 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
         if len(run) <= min(max(t * WHOLE_TOL, 35), max_chars):
             subs = [run]
         else:
-            subs = ph_pack(run, max_chars, step=len(pieces), ramp=band.ramp)
+            ramp = (band.long_start
+                    if band.long_start and not pieces else band.ramp)
+            subs = ph_pack(run, max_chars, step=len(pieces), ramp=ramp)
         last_run = ri == len(runs) - 1
         for i, s in enumerate(subs):
             last_sub = i == len(subs) - 1

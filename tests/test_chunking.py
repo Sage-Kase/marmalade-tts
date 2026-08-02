@@ -612,6 +612,19 @@ class TestPhPack:
                               eager_head=True)
         assert plan[0].gap_after_ms != 300
 
+    def test_long_start_ramp_covers_a_mid_sentence_chunk_0(self):
+        # K1-4b: a mid-sentence chunk 0 banks speech-only audio (no
+        # pause), so a band may declare a bigger opening target via
+        # long_start — used ONLY when packing the utterance's first run.
+        from marmalade_tts.chunking import StreamBand
+        run = " ".join(["wˈʌnwˈʌn"] * 20) + "."
+        plain = StreamBand("fast", (44, 40, 400), 2, 2)
+        long = StreamBand("fast", (44, 40, 400), 2, 2,
+                          long_start=(56, 40, 400))
+        p0 = ph_stream_plan(run, max_chars=500, band=plain)[0].text
+        p1 = ph_stream_plan(run, max_chars=500, band=long)[0].text
+        assert len(p0) == 44 and len(p1) == 53
+
     def test_runt_tail_merges_back(self):
         # K1-4b: a tiny final piece isn't worth a seam when its
         # predecessor can absorb it within tolerance.
