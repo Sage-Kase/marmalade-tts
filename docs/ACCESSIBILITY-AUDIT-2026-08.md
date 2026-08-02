@@ -77,3 +77,33 @@ Missing: any speech-dispatcher (Orca's speech backend) integration.
 3. stdout/stderr fix in playback (#7) — one line.
 4. sd_generic docs stanza + README accessibility section (#9).
 5. The remaining minors (#3, #4, #5, #8) are each small and mechanical.
+
+## Status (2026-08-01)
+
+Applied:
+
+- **A — `66800af`** `feat(cli): --json for --list, --list-effects, and alias
+  listing` (#2). `--list --json` reuses `mcp_server.list_voices_data`;
+  `--list-effects --json` and `--list-aliases --json` emit the same data the
+  text printers use. JSON is the only thing on stdout in that mode. Engines
+  with no shipped catalog (piper, coqui, matcha, api) return an empty
+  `voices` list plus a `note`.
+- **B — `30fe16b`** `fix(playback): player-not-found notice goes to stderr` (#7).
+- **C — `d003137`** `a11y(init): plain-prompt mode, NO_COLOR gating, fix
+  bare-ESC hang` (#1, #3, #6). `init --plain` — implied by `NO_COLOR` or
+  `TERM=dumb` — replaces both arrow-key menus with numbered `input()`
+  prompts; ANSI bold/dim go through helpers gated on `NO_COLOR` + stdout
+  isatty; the CSI tail after an ESC is polled with `select()` so a bare ESC
+  cancels the menu instead of blocking; the wizard's opening text now points
+  at `--plain` and `--non-interactive`. Default TTY appearance unchanged.
+- **D — `5325f29`** `a11y: suppress progress bars when non-TTY; document
+  subcommands in --help` (#4, #8). Non-TTY stdout ⇒ `uv pip install -q`,
+  `gdown -q` (it suppresses logging but keeps errors), and
+  `HF_HUB_DISABLE_PROGRESS_BARS=1` in the warm-cache env. The `--help`
+  epilog gained a Subcommands paragraph.
+
+Deferred:
+
+- **#5 — `×` / `→` symbol swaps.** Deferred by Max: it changes the default
+  visible output for sighted TTY users.
+- **#9 — speech-dispatcher integration.** A separate feature, unscheduled.
