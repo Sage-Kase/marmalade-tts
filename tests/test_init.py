@@ -237,6 +237,139 @@ class TestTUIHelpers:
         assert "kitten" in cfg["engines"]
 
 
+# ── Plain-prompt (screen-reader) path ────────────────────────────────────────
+
+class TestPlainMode:
+    def test_plain_mode_from_env(self, monkeypatch):
+        from marmalade_tts.init import plain_mode
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("TERM", "xterm-256color")
+        assert plain_mode() is False
+        monkeypatch.setenv("TERM", "dumb")
+        assert plain_mode() is True
+        monkeypatch.setenv("TERM", "xterm-256color")
+        monkeypatch.setenv("NO_COLOR", "1")
+        assert plain_mode() is True
+
+    def test_color_gated_by_no_color(self, monkeypatch):
+        from marmalade_tts.init import _bold, _dim
+        monkeypatch.setenv("NO_COLOR", "1")
+        assert _bold("hi") == "hi"
+        assert _dim("hi") == "hi"
+
+    def test_no_ansi_when_stdout_not_a_tty(self, monkeypatch):
+        """capsys' stdout isn't a TTY, so styling must be plain text."""
+        from marmalade_tts.init import _bold
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        assert "\033" not in _bold("hi")
+
+    def test_parse_numbers(self):
+        from marmalade_tts.init import _parse_numbers
+        assert _parse_numbers("1,3", 5) == [1, 3]
+        assert _parse_numbers("2 4", 5) == [2, 4]
+        assert _parse_numbers("0", 5) is None
+        assert _parse_numbers("6", 5) is None
+        assert _parse_numbers("x", 5) is None
+        assert _parse_numbers(",", 5) is None
+
+    def test_multi_select_plain_defaults_on_empty_input(self, capsys):
+        from marmalade_tts.init import _multi_select
+        items = [("a", "A", ""), ("b", "B", ""), ("c", "C", "")]
+        with patch("builtins.input", return_value=""):
+            got = _multi_select(items, defaults={"a", "c"}, title="T", plain=True)
+        assert got == ["a", "c"]
+        out = capsys.readouterr().out
+        assert "1) A" in out and "\033" not in out
+
+    def test_multi_select_plain_picks_numbers(self):
+        from marmalade_tts.init import _multi_select
+        items = [("a", "A", ""), ("b", "B", ""), ("c", "C", "")]
+        with patch("builtins.input", return_value="2, 3"):
+            got = _multi_select(items, defaults={"a"}, title="T", plain=True)
+        assert got == ["b", "c"]
+
+    def test_multi_select_plain_reprompts_on_bad_input(self):
+        from marmalade_tts.init import _multi_select
+        items = [("a", "A", ""), ("b", "B", "")]
+        with patch("builtins.input", side_effect=["9", "1"]):
+            got = _multi_select(items, defaults=set(), title="T", plain=True)
+        assert got == ["a"]
+
+    def test_single_select_plain_default_and_pick(self):
+        from marmalade_tts.init import _single_select
+        with patch("builtins.input", return_value=""):
+            assert _single_select(["x", "y", "z"], default="y", prompt="P",
+                                  plain=True) == "y"
+        with patch("builtins.input", return_value="3"):
+            assert _single_select(["x", "y", "z"], default="y", prompt="P",
+                                  plain=True) == "z"
+
+    def test_single_select_plain_cancels_on_eof(self):
+        from marmalade_tts.init import _single_select
+        with patch("builtins.input", side_effect=EOFError):
+            with pytest.raises(SystemExit) as exc:
+                _single_select(["x", "y"], default="x", prompt="P", plain=True)
+        assert exc.value.code == 0
+
+    def test_cli_plain_flag_reaches_wizard(self, tmp_path):
+        cfg_path = str(tmp_path / "config.yaml")
+        with patch("marmalade_tts.config.CONFIG_PATH", cfg_path), \
+             patch("sys.argv", ["marmalade-tts", "init", "--plain"]), \
+             patch("marmalade_tts.init._is_tty", return_value=True), \
+             patch("marmalade_tts.init.init_interactive",
+                   return_value=(["kitten"], {"kitten": {}}, "kitten")) as wiz, \
+             patch("marmalade_tts.init._ask_yn", return_value=False):
+            main()
+        assert wiz.call_args.kwargs["plain"] is True
+
+
+# ── ESC handling ─────────────────────────────────────────────────────────────
+
+class TestEscapeTail:
+    def test_bare_esc_does_not_block(self):
+        """No bytes follow the ESC — the read must time out, not hang."""
+        import os as _os
+        from marmalade_tts.init import _read_escape_tail
+        r, w = _os.pipe()
+        try:
+            assert _read_escape_tail(r, timeout=0.01) == ""
+        finally:
+            _os.close(r)
+            _os.close(w)
+
+    def test_arrow_tail_is_read(self):
+        import os as _os
+        from marmalade_tts.init import _read_escape_tail
+        r, w = _os.pipe()
+        try:
+            _os.write(w, b"[A")
+            assert _read_escape_tail(r, timeout=0.5) == "[A"
+        finally:
+            _os.close(r)
+            _os.close(w)
+
+    def test_esc_cancels_the_menu(self, capsys):
+        """A bare ESC exits cleanly instead of being swallowed by the loop."""
+        from marmalade_tts.init import _multi_select
+        with patch("marmalade_tts.init._read_key", return_value="ESC"), \
+             patch("marmalade_tts.init._clear_lines"):
+            with pytest.raises(SystemExit) as exc:
+                _multi_select([("a", "A", "")], defaults={"a"}, title="T")
+        assert exc.value.code == 0
+        assert "Cancelled" in capsys.readouterr().out
+
+    def test_partial_tail_gives_up(self):
+        import os as _os
+        from marmalade_tts.init import _read_escape_tail
+        r, w = _os.pipe()
+        try:
+            _os.write(w, b"[")
+            assert _read_escape_tail(r, timeout=0.01) == "["
+        finally:
+            _os.close(r)
+            _os.close(w)
+
+
 # ── Config preservation ──────────────────────────────────────────────────────
 
 class TestConfigPreservation:

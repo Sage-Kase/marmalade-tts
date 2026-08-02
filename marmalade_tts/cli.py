@@ -189,17 +189,23 @@ def cmd_init(args: list):
 
     Interactive (default):
         marmalade-tts init
+        marmalade-tts init --plain      # numbered prompts, no arrow-key TUI
 
     Non-interactive (for AI agents / scripts):
         marmalade-tts init --non-interactive --engines kitten,piper
         marmalade-tts init --non-interactive --engines kitten --set kitten.model_size=nano
     """
     import argparse as _ap
-    from .init import init_interactive, init_non_interactive, _is_tty, _ask_yn
+    from .init import (init_interactive, init_non_interactive, _is_tty,
+                       _ask_yn, plain_mode)
 
     parser = _ap.ArgumentParser(prog="marmalade-tts init", add_help=True)
     parser.add_argument("--non-interactive", action="store_true",
                         help="Skip TUI prompts; require --engines")
+    parser.add_argument("--plain", action="store_true",
+                        help="Use numbered text prompts instead of the "
+                             "arrow-key menus (screen-reader friendly). "
+                             "Implied by NO_COLOR or TERM=dumb.")
     parser.add_argument("--engines", type=str, default="",
                         help="Comma-separated engines to enable (e.g. kitten,piper,kokoro)")
     parser.add_argument("--set", action="append", dest="overrides", default=[],
@@ -243,8 +249,9 @@ def cmd_init(args: list):
         default_engine = parsed.default_engine or selected[0]
 
     else:
-        # ── Interactive TUI path ──
-        selected, engines_cfg, default_engine = init_interactive()
+        # ── Interactive path (arrow-key TUI, or plain numbered prompts) ──
+        selected, engines_cfg, default_engine = init_interactive(
+            plain=parsed.plain or plain_mode())
 
     # ── Write config ──
     # Raw user file, not the merged view — see cfg_mod.load_raw().
