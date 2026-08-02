@@ -508,6 +508,15 @@ class TestPhSentenceRuns:
     def test_intra_sentence_marks_untouched(self):
         assert ph_sentence_runs(PH_COLON)[0].count(":") == 1
 
+    def test_quote_end_split_is_opt_in(self):
+        # '!"' + space is a real sentence end, but splitting there
+        # changes run boundaries (rows, gaps) — engines opt in (K1-5).
+        ph = 'sˈɛd, "ðə ʃˈɪp!" ˈɛvɹiwən ɹˈæn.'
+        assert len(ph_sentence_runs(ph, keep_marks=".!?")) == 1
+        runs = ph_sentence_runs(ph, keep_marks=".!?",
+                                split_quote_ends=True)
+        assert runs == ['sˈɛd, "ðə ʃˈɪp!"', 'ˈɛvɹiwən ɹˈæn.']
+
 
 class TestPhPack:
     def test_short_run_is_one_piece(self):

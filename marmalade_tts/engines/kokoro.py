@@ -147,6 +147,11 @@ class KokoroEngine(Engine):
     name = "kokoro"
     MAX_CHARS = 500
     SUPPORTS_LANG = True  # single-letter misaki codes (a/b/j/z)
+    # A sentence mark inside closing quotes ends a run (K1-5, Max's
+    # verdict 2026-08-01): '!"' is a real sentence end — merging it made
+    # the plan condition across a boundary the model pauses at. Kokoro
+    # opts in; kitten's approved renders keep the legacy merge.
+    QUOTE_END_RUNS = True
     STREAM_BANDS = STREAM_BANDS
 
     def __init__(self, cfg: dict):

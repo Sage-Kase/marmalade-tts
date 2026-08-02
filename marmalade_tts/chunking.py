@@ -186,6 +186,9 @@ def chunk_for_streaming(text: str, max_chars: int) -> list[str]:
 #     inserted silence — Max's "really bad" verdict on J2c.
 
 _PH_SENTENCE = re.compile(r"(?<=[.!?])(?=\s)")
+# As above, but a sentence mark inside closing quotes also ends a run
+# (ph_sentence_runs(split_quote_ends=True)).
+_PH_SENTENCE_Q = re.compile(r"(?:(?<=[.!?])|(?<=[.!?][\"”’']))(?=\s)")
 _PH_TERMINAL_MARK = re.compile(r"([.!?])[\"”']*$")
 _PH_TERMINAL = re.compile(r"[.!?]+(?=[\"”']*$)")
 
@@ -375,13 +378,23 @@ class PhPiece:
                 f"{self.style_ref})")
 
 
-def ph_sentence_runs(ph: str, keep_marks: str = "") -> list[str]:
+def ph_sentence_runs(ph: str, keep_marks: str = "",
+                     split_quote_ends: bool = False) -> list[str]:
     """Split a phonemized utterance into sentence runs, swapping each run's
     terminal .!? for a comma. Marks listed in ``keep_marks`` are left alone
     (the model does render them — measured pauses period 225ms · ! 146 ·
-    ? 114 — it is the wrapper that substitutes commas)."""
+    ? 114 — it is the wrapper that substitutes commas).
+
+    ``split_quote_ends`` also ends a run at a sentence mark inside closing
+    quotes ('!"' + space) — a real sentence end the plain split misses, so
+    without it a dialogue-final sentence merges with the narration after
+    it and gets cut mid-flow instead of at the pause (K1-5). Off by
+    default: turning it on changes run boundaries (rows, gaps), so each
+    engine's sound owner opts in (kokoro does; kitten's approved renders
+    keep the merge)."""
+    splitter = _PH_SENTENCE_Q if split_quote_ends else _PH_SENTENCE
     runs: list[str] = []
-    for run in _PH_SENTENCE.split(ph):
+    for run in splitter.split(ph):
         run = run.strip()
         if not run:
             continue
@@ -509,17 +522,19 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
                    gap_ms: int = RUN_GAP_MS,
                    band: "StreamBand | None" = None,
                    text: "str | None" = None,
-                   ph_rows: bool = False) -> list[PhPiece]:
+                   ph_rows: bool = False,
+                   split_quote_ends: bool = False) -> list[PhPiece]:
     """The full streaming plan for one phonemized utterance.
 
     ``text`` is the pre-phonemization utterance; when given, each run's
     pieces carry the run's style row (see ``_run_style_refs``).
     ``ph_rows`` instead derives each run's row from its own PHONEME length
     (kokoro indexes its pack by phoneme count — ``pack[len(ps)-1]``).
-    With neither, ``style_ref`` stays None and the caller picks a row."""
+    With neither, ``style_ref`` stays None and the caller picks a row.
+    ``split_quote_ends`` is ph_sentence_runs' flag (engine opt-in)."""
     if band is None:
         band = band_for_rtf(None)
-    runs = ph_sentence_runs(ph, keep_marks)
+    runs = ph_sentence_runs(ph, keep_marks, split_quote_ends)
     if text:
         rows = _run_style_refs(ph, runs, text)
     elif ph_rows:
