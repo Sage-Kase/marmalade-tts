@@ -9,6 +9,8 @@ in the kokoro venv, not the repo's test env).
 
 import importlib.util
 import os
+import sys
+import types
 
 import pytest
 
@@ -214,3 +216,115 @@ def test_splice_ignores_out_of_range_inserts():
     wav = np.full(1000, LOUD, dtype=np.float32)
     out = kokoro_daemon._splice(wav, [(50, 200)], 100, 900)
     assert len(out) == 800
+
+
+# ── multi-language serving ──────────────────────────────────────────────────
+#
+# The daemon preloads KOKORO_LANG but serves any lang: voice embedding and
+# G2P language are orthogonal in kokoro, so an unloaded lang costs a misaki
+# front end, not another copy of the weights. kokoro/numpy/soundfile live in
+# the kokoro venv, so everything below is stubbed.
+
+class _FakeAudio:
+    def numpy(self):
+        return [0.1, 0.2]
+
+
+class _FakeResult:
+    audio = _FakeAudio()
+    phonemes = "fəʊ"
+
+
+class FakeKPipeline:
+    """Stub KPipeline. `model=True` mints a fresh model (the startup load);
+    anything else is taken as given (False = G2P-only, or a shared KModel)."""
+
+    created = []
+
+    def __init__(self, lang_code, model=True, device=None):
+        self.lang_code = lang_code
+        self.model = object() if model is True else model
+        self.device = device
+        self.calls = []
+        FakeKPipeline.created.append(self)
+
+    def __call__(self, text, voice=None, speed=1.0):
+        self.calls.append((text, voice, speed))
+        return [_FakeResult()]
+
+
+@pytest.fixture
+def kokoro_env(monkeypatch):
+    """Stub out the kokoro venv's imports and reset the created-pipeline log."""
+    FakeKPipeline.created = []
+
+    kokoro = types.ModuleType("kokoro")
+    kokoro.KPipeline = FakeKPipeline
+    monkeypatch.setitem(sys.modules, "kokoro", kokoro)
+
+    sf = types.ModuleType("soundfile")
+    sf.written = []
+    sf.write = lambda path, data, rate: sf.written.append((path, data, rate))
+    monkeypatch.setitem(sys.modules, "soundfile", sf)
+
+    np = types.ModuleType("numpy")
+    np.concatenate = lambda chunks: [x for c in chunks for x in c]
+    monkeypatch.setitem(sys.modules, "numpy", np)
+
+    monkeypatch.setattr(kokoro_daemon, "DEFAULT_LANG", "a")
+    return sf
+
+
+def _text_req(tmp_path, lang, name="o.wav"):
+    return {"text": "hello", "lang": lang, "out": str(tmp_path / name)}
+
+
+def test_preloads_default_lang_only(kokoro_env):
+    pipelines = kokoro_daemon.load_model()
+    # Warm start: the full pipeline plus its G2P twin, nothing else.
+    assert [(p.lang_code, p.device) for p in FakeKPipeline.created] == [
+        ("a", "cpu"), ("a", None)]
+    assert pipelines.model is FakeKPipeline.created[0].model
+
+
+def test_serves_a_lang_other_than_the_preloaded_one(kokoro_env, tmp_path):
+    pipelines = kokoro_daemon.load_model()
+    kokoro_daemon.synth(pipelines, _text_req(tmp_path, "b"))
+    assert pipelines.full("b").calls == [("hello", "af_heart", 1.0)]
+    assert kokoro_env.written[0][0] == str(tmp_path / "o.wav")
+
+
+def test_pipelines_are_cached_per_lang(kokoro_env, tmp_path):
+    pipelines = kokoro_daemon.load_model()
+    kokoro_daemon.synth(pipelines, _text_req(tmp_path, "b", "1.wav"))
+    made = len(FakeKPipeline.created)
+    kokoro_daemon.synth(pipelines, _text_req(tmp_path, "b", "2.wav"))
+    assert len(FakeKPipeline.created) == made  # reused, not rebuilt
+    assert len(pipelines.full("b").calls) == 2
+
+
+def test_full_pipelines_share_one_model(kokoro_env):
+    pipelines = kokoro_daemon.load_model()
+    shared = pipelines.full("a").model
+    assert pipelines.full("b").model is shared
+    assert pipelines.full("j").model is shared
+    assert shared is pipelines.model
+
+
+def test_missing_lang_falls_back_to_the_preloaded_one(kokoro_env, tmp_path):
+    pipelines = kokoro_daemon.load_model()
+    kokoro_daemon.synth(pipelines, {"text": "hello",
+                                    "out": str(tmp_path / "o.wav")})
+    assert len(pipelines.full("a").calls) == 1
+    assert len(FakeKPipeline.created) == 2  # no new front end
+
+
+def test_phonemize_uses_a_model_free_pipeline_for_the_requested_lang(
+        kokoro_env, tmp_path):
+    pipelines = kokoro_daemon.load_model()
+    out = tmp_path / "ph.txt"
+    kokoro_daemon.synth(pipelines, {"op": "phonemize", "text": "hello",
+                                    "lang": "b", "out": str(out)})
+    assert out.read_text(encoding="utf-8") == "fəʊ"
+    assert pipelines.g2p("b").model is not pipelines.model  # G2P-only
+    assert pipelines.full("b").calls == []  # inference never ran

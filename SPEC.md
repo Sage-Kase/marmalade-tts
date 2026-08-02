@@ -145,6 +145,11 @@ silently synthesizing with the wrong model. Config changes made while a
 daemon is running require `marmalade-tts daemon stop --engine X`; it
 auto-starts again (with the new config) on next use.
 
+Kokoro is the exception on language: `KOKORO_LANG` only picks the language
+preloaded at startup. A request for any other `lang` is served by a front
+end built on demand around the same loaded weights, so no restart is
+needed to switch language.
+
 ### Tab Completion
 
 ```

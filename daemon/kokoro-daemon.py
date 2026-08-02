@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """marmalade-tts kokoro daemon — keeps the Kokoro pipeline loaded in RAM.
 
+Any supported `lang` is served: KOKORO_LANG only picks the one preloaded
+at startup (warm first call), and other languages get their front end
+built on demand around the same weights — see _Pipelines.
+
 Text request:  {"text": "...", "voice": "af_heart", "speed": 1.0, "lang": "a",
                 "out": "/tmp/x.wav"}
 Phonemize:     {"op": "phonemize", "text": "...", "lang": "a", "out": ...}
@@ -25,7 +29,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import serve, check_loaded
+from _common import serve
 
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -271,32 +275,60 @@ def _synth_phonemes(pipeline, req):
     sf.write(req["out"], out_wav, SAMPLE_RATE)
 
 
+class _Pipelines:
+    """Per-language pipelines over ONE loaded KModel.
+
+    A KPipeline is a misaki G2P front end bolted to a model; the voice
+    embedding and the G2P language are orthogonal, so a lang the daemon
+    didn't preload costs only a front end, not a second copy of the
+    weights (passing `model=` reuses the loaded one). Both maps are
+    filled lazily and kept — requests are serialized by the daemon's
+    concurrency gate, so plain dicts are enough.
+    """
+
+    def __init__(self, lang: str):
+        from kokoro import KPipeline
+        import soundfile as sf  # noqa: F401  — fail fast if missing
+        self._KPipeline = KPipeline
+        pipe = KPipeline(lang_code=lang, device="cpu")
+        self.model = pipe.model
+        self._full = {lang: pipe}
+        # Model-free pipelines serve op=phonemize: calling the full
+        # pipeline would run inference; these stop at misaki G2P.
+        self._g2p = {lang: KPipeline(lang_code=lang, model=False)}
+
+    def full(self, lang: str):
+        if lang not in self._full:
+            self._full[lang] = self._KPipeline(lang_code=lang,
+                                               model=self.model)
+        return self._full[lang]
+
+    def g2p(self, lang: str):
+        if lang not in self._g2p:
+            self._g2p[lang] = self._KPipeline(lang_code=lang, model=False)
+        return self._g2p[lang]
+
+
 def load_model():
-    from kokoro import KPipeline
-    import soundfile as sf  # noqa: F401  — fail fast if missing
-    pipe = KPipeline(lang_code=DEFAULT_LANG, device="cpu")
-    # A second, model-free pipeline serves op=phonemize: calling the full
-    # pipeline would run inference; this one stops at misaki G2P.
-    g2p = KPipeline(lang_code=DEFAULT_LANG, model=False)
-    return pipe, g2p
+    return _Pipelines(DEFAULT_LANG)
 
 
-def synth(bundle, req):
+def synth(pipelines, req):
     import numpy as np
     import soundfile as sf
 
-    pipeline, g2p = bundle
-
-    # The pipeline's G2P language is fixed at load; a request for a
-    # different lang (e.g. a British voice through an 'a' daemon) would
-    # silently mispronounce, so refuse it instead.
-    check_loaded("kokoro", req.get("lang"), DEFAULT_LANG, what="lang")
+    # KOKORO_LANG is the preloaded (warm) language, not a restriction:
+    # any other lang builds its front end on first use.
+    lang = req.get("lang") or DEFAULT_LANG
 
     if req.get("op") == "phonemize":
+        g2p = pipelines.g2p(lang)
         ph = " ".join(r.phonemes for r in g2p(req["text"]) if r.phonemes)
         with open(req["out"], "w", encoding="utf-8") as f:
             f.write(ph)
         return
+
+    pipeline = pipelines.full(lang)
 
     if "ph_text" in req:
         _synth_phonemes(pipeline, req)  # no text fallback: exact or error
