@@ -18,8 +18,11 @@ DEFAULT_CONFIG = {
     },
     "presets": {
         "fast":     {"kitten": "nano",  "kokoro": "af_heart", "piper": "en_US-lessac-medium", "coqui": "tts_models/en/ljspeech/tacotron2-DDC", "pocket": "alba",    "matcha": "matcha_ljspeech", "emojivoice": "paige", "api": "af_heart"},
-        "balanced": {"kitten": "micro", "kokoro": "af_heart", "piper": "en_US-lessac-medium", "coqui": "tts_models/en/ljspeech/tacotron2-DDC", "pocket": "fantine", "matcha": "matcha_ljspeech", "emojivoice": "paige", "api": "af_heart"},
-        "quality":  {"kitten": "mini",  "kokoro": "af_heart", "piper": "en_US-lessac-medium", "coqui": "tts_models/en/ljspeech/tacotron2-DDC", "pocket": "cosette", "matcha": "matcha_ljspeech", "emojivoice": "paige", "api": "af_heart"},
+        # Kitten stays "nano" in every preset: upstream publishes micro/mini
+        # only as dynamic-int8 ONNX, which sounds worse AND runs slower than
+        # fp32 nano (ear-verified 2026-08-02).
+        "balanced": {"kitten": "nano", "kokoro": "af_heart", "piper": "en_US-lessac-medium", "coqui": "tts_models/en/ljspeech/tacotron2-DDC", "pocket": "fantine", "matcha": "matcha_ljspeech", "emojivoice": "paige", "api": "af_heart"},
+        "quality":  {"kitten": "nano", "kokoro": "af_heart", "piper": "en_US-lessac-medium", "coqui": "tts_models/en/ljspeech/tacotron2-DDC", "pocket": "cosette", "matcha": "matcha_ljspeech", "emojivoice": "paige", "api": "af_heart"},
     },
     "engines": {
         "kitten": {

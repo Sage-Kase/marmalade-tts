@@ -183,23 +183,24 @@ presets:
     matcha: matcha_ljspeech
     emojivoice: paige
   balanced:
-    # ...same structure, model_size: micro / alternate voices...
+    # ...same structure, alternate voices... (kitten stays nano: upstream
+    # micro/mini are int8-only and sound worse than fp32 nano)
   quality:
-    # ...same structure, model_size: mini / alternate voices...
+    # ...same structure, alternate voices...
 
 engines:
   kitten:
     device: cpu
-    model_size: micro      # nano | micro | mini
+    model_size: nano       # nano | micro | mini (nano = fp32, best quality + fastest)
     voice: Kiki            # default voice
     daemon: true           # keep model in RAM via daemon
     # preprocessing: [currency, number, filename]   # override the default rule profile
     # max_chars: 500        # chunking threshold (see Chunking below)
     # voices: Bella, Jasper, Luna, Bruno, Rosie, Hugo, Kiki, Leo
     # model repos:
-    #   nano:  KittenML/kitten-tts-nano-0.8   (~23MB)
-    #   micro: KittenML/kitten-tts-micro-0.8  (~41MB)
-    #   mini:  KittenML/kitten-tts-mini-0.8   (~80MB)
+    #   nano:  KittenML/kitten-tts-nano-0.8   (fp32, ~57MB)
+    #   micro: KittenML/kitten-tts-micro-0.8  (int8, ~41MB)
+    #   mini:  KittenML/kitten-tts-mini-0.8   (int8, ~78MB)
 
   kokoro:
     device: cpu

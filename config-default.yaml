@@ -21,7 +21,7 @@ presets:
     emojivoice: paige
     api: af_heart
   balanced:
-    kitten: micro
+    kitten: nano    # micro/mini are int8-only upstream: slower AND worse than fp32 nano
     kokoro: af_heart
     piper: en_US-lessac-medium
     coqui: tts_models/en/ljspeech/tacotron2-DDC
@@ -30,7 +30,7 @@ presets:
     emojivoice: paige
     api: af_heart
   quality:
-    kitten: mini
+    kitten: nano    # see balanced note
     kokoro: af_heart
     piper: en_US-lessac-medium
     coqui: tts_models/en/ljspeech/tacotron2-DDC

@@ -18,14 +18,14 @@ ENGINE_INFO = {
     "kitten": {
         "label": "Kitten TTS",
         "desc":  "Fast, lightweight, great quality. Ships by default.",
-        "size":  "~23–80 MB (nano/micro/mini)",
+        "size":  "~40–80 MB (nano/micro/mini)",
         "default": True,
         "options": {
             "model_size": {
                 "prompt": "Model size",
                 "choices": ["nano", "micro", "mini"],
                 "default": "nano",
-                "help": "nano (~23MB, fastest)  micro (~41MB, balanced)  mini (~80MB, best quality)",
+                "help": "nano (fp32, fastest AND best quality)  micro/mini (int8-only upstream: slower, audibly worse)",
             },
         },
     },

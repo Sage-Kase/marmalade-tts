@@ -972,7 +972,7 @@ output also gains a `"duration"` field per utterance.
 - **RAM:** ~200 MB for kitten/pocket, ~1.5 GB for kokoro daemon, varies for
   coqui depending on model.
 - **Disk (models, downloaded on first use):**
-  - Kitten: 23–80 MB (nano/micro/mini)
+  - Kitten: 40–80 MB (nano/micro/mini)
   - Piper voices: 15–75 MB each
   - Pocket: ~200 MB
   - Kokoro: ~500 MB

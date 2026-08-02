@@ -25,7 +25,7 @@ class KittenEngine(Engine):
     def __init__(self, cfg: dict):
         self.cfg = cfg
         self.voice = cfg.get("voice", "Kiki")
-        self.model_size = cfg.get("model_size", "micro")
+        self.model_size = cfg.get("model_size", "nano")
         self.use_daemon = cfg.get("daemon", True)
         # The kitten daemon runs concurrent requests (serve max_concurrency=4
         # with a phonemizer lock); the subprocess fallback must stay serial.
@@ -115,6 +115,9 @@ class KittenEngine(Engine):
     def list_voices(self):
         print("Language: English only (en)")
         print(f"Kitten TTS voices: {', '.join(VOICES)}")
-        print("Model sizes: nano (~23MB)  micro (~41MB)  mini (~80MB)")
+        # Upstream ships micro/mini only as dynamic-int8 ONNX (no fp32
+        # published); fp32 nano beats them on quality AND speed.
+        print("Model sizes: nano (fp32, fastest + best quality)  "
+              "micro (int8)  mini (int8)")
         for size, repo in MODEL_REPOS.items():
             print(f"  {size}: {repo}")

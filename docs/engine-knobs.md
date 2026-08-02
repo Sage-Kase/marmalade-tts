@@ -44,7 +44,7 @@ Fast, lightweight, English-only. 8 voices, 3 model sizes.
 | Knob       | CLI       | Config key                   | Default | Notes                                  |
 |------------|-----------|------------------------------|---------|----------------------------------------|
 | voice      | positional / `--voice` | `engines.kitten.voice`       | `Kiki`  | One of: Bella, Jasper, Luna, Bruno, Rosie, Hugo, Kiki, Leo |
-| model_size | —         | `engines.kitten.model_size`  | `nano`  | `nano` (~23MB), `micro` (~41MB), `mini` (~80MB) |
+| model_size | —         | `engines.kitten.model_size`  | `nano`  | `nano` (fp32 ~57MB, fastest + best quality), `micro` (int8 ~41MB), `mini` (int8 ~78MB) — upstream ships micro/mini only as dynamic-int8, which sounds worse and runs slower than fp32 nano |
 
 ```bash
 marmalade-tts kitten Hugo "Hello"
