@@ -877,7 +877,12 @@ def _run():
         synth_kwargs["voice"] = voice
     lang = args.lang or (alias_overrides.get("lang") if alias_overrides else None)
     if lang:
-        synth_kwargs["lang"] = lang
+        if getattr(engine, "SUPPORTS_LANG", False):
+            synth_kwargs["lang"] = lang
+        else:
+            print(f"[marmalade-tts] warning: {engine_name} does not take a "
+                  f"language setting — its language comes from the "
+                  f"voice/model. Ignoring lang={lang!r}.", file=sys.stderr)
     speaker = args.speaker or (alias_overrides.get("speaker") if alias_overrides else None)
     if speaker:
         synth_kwargs["speaker"] = speaker

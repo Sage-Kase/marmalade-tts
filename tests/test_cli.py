@@ -760,6 +760,7 @@ class TestPassthroughFlags:
         received = {}
 
         class FakeEngine:
+            SUPPORTS_LANG = True
             def __init__(self, cfg):
                 pass
             def synthesize(self, text, out_path, **kwargs):
@@ -790,6 +791,43 @@ class TestPassthroughFlags:
     def test_speaker_passthrough_for_piper(self):
         received = self._run(["marmalade-tts", "piper", "hello", "--speaker", "2"])
         assert received["kwargs"].get("speaker") == "2"
+
+    def test_lang_dropped_with_warning_for_non_lang_engine(self, capsys):
+        # Real engine classes declare SUPPORTS_LANG; piper's language comes
+        # from the voice model, so --lang must warn instead of silently
+        # doing nothing (the pre-2026-08 behavior).
+        received = {}
+
+        class FakePiper:  # no SUPPORTS_LANG → treated as unsupported
+            def __init__(self, cfg):
+                pass
+            def synthesize(self, text, out_path, **kwargs):
+                received["kwargs"] = kwargs
+
+        fake_config = {
+            "defaults": {"engine": "piper", "speed": 1.0, "play": False,
+                         "preprocessing": False},
+            "engines": {"piper": {"model": "/dev/null", "daemon": False,
+                                  "device": "cpu"}},
+            "presets": {},
+        }
+        with patch("sys.argv", ["marmalade-tts", "piper", "hello", "--lang", "fr"]), \
+             patch("marmalade_tts.cli.cfg_mod.load", return_value=fake_config), \
+             patch("marmalade_tts.cli.make_tmp_wav", return_value="/tmp/auto.wav"), \
+             patch("marmalade_tts.cli.play_wav"), \
+             patch("marmalade_tts.cli.os.unlink"), \
+             patch("marmalade_tts.cli.os.path.exists", return_value=True), \
+             patch.dict("marmalade_tts.cli.ENGINE_CLASSES", {"piper": FakePiper}):
+            main()
+
+        assert "lang" not in received["kwargs"]
+        assert "warning" in capsys.readouterr().err.lower()
+
+    def test_real_engine_lang_declarations(self):
+        from marmalade_tts.cli import ENGINE_CLASSES
+        supports = {name for name, cls in ENGINE_CLASSES.items()
+                    if getattr(cls, "SUPPORTS_LANG", False)}
+        assert supports == {"kokoro", "coqui"}
 
 
 # ── Scripting / agent flags ───────────────────────────────────────────────────
@@ -1432,3 +1470,17 @@ def test_no_player_notice_goes_to_stderr(capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "No audio player found" in captured.err
+
+
+# ── --help discoverability ────────────────────────────────────────────────────
+
+def test_help_lists_subcommands(capsys):
+    """Subcommands are dispatched before argparse, so --help is the only
+    place a non-sighted user can discover them."""
+    with pytest.raises(SystemExit):
+        with patch("sys.argv", ["marmalade-tts", "--help"]):
+            main()
+    out = capsys.readouterr().out
+    assert "Subcommands" in out
+    for sub in ("init", "install", "uninstall", "config", "daemon", "mcp"):
+        assert sub in out

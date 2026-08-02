@@ -29,6 +29,11 @@ class Engine:
     # arbitrary lengths gracefully, don't chunk. Override per engine.
     MAX_CHARS: "int | None" = None
 
+    # Whether ``synthesize`` honors a ``lang`` kwarg. For the other engines
+    # language is a property of the voice/model (or English-only), and the
+    # CLI warns instead of passing a flag that would be silently dropped.
+    SUPPORTS_LANG: bool = False
+
     # Whether chunked synthesis may call ``synthesize`` from several threads
     # at once (the chunk loop in synth.py fans out after the first chunk).
     # Only safe for daemon-backed engines whose daemon accepts concurrent

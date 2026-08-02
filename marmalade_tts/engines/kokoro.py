@@ -146,6 +146,7 @@ STREAM_BANDS = (
 class KokoroEngine(Engine):
     name = "kokoro"
     MAX_CHARS = 500
+    SUPPORTS_LANG = True  # single-letter misaki codes (a/b/j/z)
     STREAM_BANDS = STREAM_BANDS
 
     def __init__(self, cfg: dict):
