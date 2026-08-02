@@ -56,9 +56,27 @@ Render text to a WAV file.
 | `engine` | string, optional | `kitten` / `kokoro` / `piper` / `coqui` / `pocket` / `matcha` / `emojivoice`. Uses the configured default when omitted. |
 | `voice` | string, optional | Voice name — engine-specific. Discover with `list_voices` / `find_voice`. |
 | `speed` | number, default `1.0` | Speech-rate multiplier. |
+| `lang` | string, optional | Pronunciation language. Usually unnecessary — see below. |
 | `out_path` | string, optional | Where to write the WAV. A temp file is used when omitted. |
 
-Returns `{"out": "/path/to/file.wav", "engine": "kokoro", "voice": "george"}`.
+Returns `{"out": "/path/to/file.wav", "engine": "kokoro", "voice": "george"}`,
+plus a `note` field when an argument was ignored.
+
+#### `lang`
+
+Only `kokoro` and `coqui` accept a language setting (they declare
+`SUPPORTS_LANG`). For every other engine the language is a property of the
+voice/model, so a `lang` passed to them is dropped and the result carries a
+`note` saying so — MCP has no stderr, so the result text is the only channel.
+
+| Engine | Code vocabulary |
+|--------|-----------------|
+| `kokoro` | Single misaki letters: `a` American English, `b` British English, `j` Japanese, `z` Mandarin |
+| `coqui` | IETF codes for multilingual models: `en`, `es`, `fr`, … |
+
+Kokoro voices already default to their own natural language — `george` speaks
+British English, `alpha`/`kumo` Japanese, `xiaobei`/`yunjian` Mandarin, with no
+`lang` given. Pass `lang` only to force a voice to speak a different language.
 
 ### `list_voices`
 
@@ -68,7 +86,10 @@ List shipped voices, with one-line descriptions.
 |-----|------|-------|
 | `engine` | string, optional | Filter to one engine. |
 
-Returns a list of `{name, engine, language, description}`. Covers `kokoro`,
+Returns a list of `{name, engine, language, lang, description}`, where
+`language` is the human-readable label and `lang` is the code you can hand
+back to `synthesize` (`a`/`b`/`j`/`z` for kokoro; empty for engines that
+don't take one). Covers `kokoro`,
 `kitten`, `pocket`, and `emojivoice`. `piper` and `coqui` are omitted —
 their voices are user-installed model paths, not bare names, so an MCP
 client can't enumerate them anyway.

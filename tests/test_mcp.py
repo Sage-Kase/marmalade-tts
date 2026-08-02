@@ -53,6 +53,74 @@ class TestSynthesisFailureContract:
         assert "boom" in result["error"]
 
 
+# ── lang plumbing ───────────────────────────────────────────────────────────
+# Only engines declaring SUPPORTS_LANG get a `lang` kwarg. MCP has no stderr,
+# so a dropped lang has to come back in the result.
+
+class _FakeResult:
+    out = "/tmp/out.wav"
+
+
+class TestLangPlumbing:
+    def _run(self, engine_name, engine_cls, **kwargs):
+        """Call synthesize_text with a stub engine; return (result, synth_kwargs)."""
+        captured = {}
+
+        def _fake_synthesize_one(text, out, **kw):
+            captured.update(kw["synth_kwargs"])
+            return _FakeResult()
+
+        config = {
+            "defaults": {"engine": engine_name, "speed": 1.0},
+            "engines": {engine_name: {"voice": "heart"}},
+        }
+        with patch("marmalade_tts.mcp_server.cfg_mod.load", return_value=config), \
+             patch("marmalade_tts.mcp_server.make_tmp_wav", return_value="/tmp/out.wav"), \
+             patch("marmalade_tts.synth.synthesize_one", _fake_synthesize_one), \
+             patch.dict("marmalade_tts.mcp_server.ENGINE_CLASSES",
+                        {engine_name: engine_cls}):
+            result = synthesize_text("hello", engine=engine_name, **kwargs)
+        return result, captured
+
+    def test_lang_forwarded_for_lang_supporting_engine(self):
+        class FakeKokoro:
+            SUPPORTS_LANG = True
+            def __init__(self, cfg):
+                pass
+
+        result, synth_kwargs = self._run("kokoro", FakeKokoro, lang="j")
+        assert synth_kwargs.get("lang") == "j"
+        assert "note" not in result
+
+    def test_lang_omitted_when_not_given(self):
+        class FakeKokoro:
+            SUPPORTS_LANG = True
+            def __init__(self, cfg):
+                pass
+
+        result, synth_kwargs = self._run("kokoro", FakeKokoro)
+        # Unset lang means "the voice's natural language" — don't force one.
+        assert "lang" not in synth_kwargs
+        assert "note" not in result
+
+    def test_lang_ignored_with_note_for_non_supporting_engine(self):
+        class FakeKitten:  # no SUPPORTS_LANG
+            def __init__(self, cfg):
+                pass
+
+        result, synth_kwargs = self._run("kitten", FakeKitten, lang="fr")
+        assert "lang" not in synth_kwargs
+        assert "note" in result
+        assert "fr" in result["note"]
+        assert "kitten" in result["note"]
+
+    def test_real_engine_lang_declarations(self):
+        from marmalade_tts.mcp_server import ENGINE_CLASSES
+        supports = {name for name, cls in ENGINE_CLASSES.items()
+                    if getattr(cls, "SUPPORTS_LANG", False)}
+        assert supports == {"kokoro", "coqui"}
+
+
 # ── list_voices_data ────────────────────────────────────────────────────────
 
 class TestListVoicesData:
@@ -64,7 +132,7 @@ class TestListVoicesData:
     def test_voice_shape(self):
         voices = list_voices_data()
         v = voices[0]
-        assert set(v.keys()) == {"name", "engine", "language", "description"}
+        assert set(v.keys()) == {"name", "engine", "language", "lang", "description"}
         assert all(isinstance(v[k], str) for k in v)
 
     def test_filter_to_kokoro(self):
@@ -94,6 +162,20 @@ class TestListVoicesData:
         voices = list_voices_data("emojivoice")
         names = {v["name"] for v in voices}
         assert names == {"paige"}
+
+    def test_kokoro_lang_codes(self):
+        codes = {v["name"]: v["lang"] for v in list_voices_data("kokoro")}
+        assert codes["heart"] == "a"
+        assert codes["george"] == "b"
+        assert codes["alpha"] == "j"
+        assert codes["xiaobei"] == "z"
+        assert set(codes.values()) == {"a", "b", "j", "z"}
+
+    def test_non_lang_engines_have_empty_lang(self):
+        # kitten / pocket / emojivoice don't take a language setting; an
+        # empty code says "not selectable" without inviting a dropped arg.
+        for eng in ("kitten", "pocket", "emojivoice"):
+            assert all(v["lang"] == "" for v in list_voices_data(eng))
 
     def test_piper_and_coqui_omitted(self):
         # Voices are user-installed model paths, not bare names — exposing

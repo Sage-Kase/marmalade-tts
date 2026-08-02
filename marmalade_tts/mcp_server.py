@@ -2,7 +2,7 @@
 
 Three tools, served over stdio:
 
-  - synthesize(text, engine?, voice?, speed?, out_path?)
+  - synthesize(text, engine?, voice?, speed?, lang?, out_path?)
       Render text to a WAV through the same code path the CLI uses.
   - list_voices(engine?)
       Enumerate shipped voices (kokoro / kitten / pocket / emojivoice).
@@ -33,36 +33,42 @@ from .playback import make_tmp_wav
 # enumerate the user's local .onnx / tts_models/... files.
 
 VOICE_DESCRIPTIONS: dict[tuple[str, str], dict[str, str]] = {
-    # (engine, voice): {language, description}
+    # (engine, voice): {language, lang, description}
+    #
+    # ``language`` is the human-readable label used for keyword matching;
+    # ``lang`` is the machine-usable code a caller can hand to `synthesize`.
+    # For kokoro these are misaki's single letters (a/b/j/z) and match the
+    # voice's natural language — passing them is optional, since a kokoro
+    # voice already defaults to its own language.
 
     # ── kokoro ──
-    ("kokoro", "heart"):      {"language": "American English",
+    ("kokoro", "heart"):      {"language": "American English", "lang": "a",
                                "description": "Warm American female, conversational, friendly"},
-    ("kokoro", "bella"):      {"language": "American English",
+    ("kokoro", "bella"):      {"language": "American English", "lang": "a",
                                "description": "Bright American female, expressive"},
-    ("kokoro", "nicole"):     {"language": "American English",
+    ("kokoro", "nicole"):     {"language": "American English", "lang": "a",
                                "description": "Calm American female, narration"},
-    ("kokoro", "adam"):       {"language": "American English",
+    ("kokoro", "adam"):       {"language": "American English", "lang": "a",
                                "description": "American male, neutral and clear"},
-    ("kokoro", "michael"):    {"language": "American English",
+    ("kokoro", "michael"):    {"language": "American English", "lang": "a",
                                "description": "American male, warm and grounded"},
-    ("kokoro", "emma"):       {"language": "British English",
+    ("kokoro", "emma"):       {"language": "British English", "lang": "b",
                                "description": "British female, articulate"},
-    ("kokoro", "isabella"):   {"language": "British English",
+    ("kokoro", "isabella"):   {"language": "British English", "lang": "b",
                                "description": "British female, polished"},
-    ("kokoro", "george"):     {"language": "British English",
+    ("kokoro", "george"):     {"language": "British English", "lang": "b",
                                "description": "British male, warm narrator"},
-    ("kokoro", "lewis"):      {"language": "British English",
+    ("kokoro", "lewis"):      {"language": "British English", "lang": "b",
                                "description": "British male, conversational"},
-    ("kokoro", "alpha"):      {"language": "Japanese",
+    ("kokoro", "alpha"):      {"language": "Japanese", "lang": "j",
                                "description": "Japanese female, soft (best for Japanese)"},
-    ("kokoro", "gongitsune"): {"language": "Japanese",
+    ("kokoro", "gongitsune"): {"language": "Japanese", "lang": "j",
                                "description": "Japanese female, storyteller (best for Japanese)"},
-    ("kokoro", "kumo"):       {"language": "Japanese",
+    ("kokoro", "kumo"):       {"language": "Japanese", "lang": "j",
                                "description": "Japanese male, calm (best for Japanese)"},
-    ("kokoro", "xiaobei"):    {"language": "Mandarin",
+    ("kokoro", "xiaobei"):    {"language": "Mandarin", "lang": "z",
                                "description": "Mandarin female (best for Mandarin)"},
-    ("kokoro", "yunjian"):    {"language": "Mandarin",
+    ("kokoro", "yunjian"):    {"language": "Mandarin", "lang": "z",
                                "description": "Mandarin male (best for Mandarin)"},
 
     # ── kitten ──
@@ -118,6 +124,10 @@ def list_voices_data(engine: str | None = None) -> list[dict]:
     Filters to one engine when ``engine`` is given. Engines whose voices are
     user-installed model paths (piper, coqui, matcha) are omitted — an MCP
     client can't enumerate those.
+
+    Each entry carries both ``language`` (human-readable) and ``lang`` (the
+    code accepted by ``synthesize``). ``lang`` is empty for engines that
+    don't take one — their language is fixed by the voice/model.
     """
     out = []
     for (eng, name), meta in VOICE_DESCRIPTIONS.items():
@@ -127,6 +137,7 @@ def list_voices_data(engine: str | None = None) -> list[dict]:
             "name": name,
             "engine": eng,
             "language": meta["language"],
+            "lang": meta.get("lang", ""),
             "description": meta["description"],
         })
     return out
@@ -214,10 +225,14 @@ def synthesize_text(
     voice: str | None = None,
     speed: float | None = None,
     out_path: str | None = None,
+    lang: str | None = None,
 ) -> dict:
     """Render text to a WAV, reusing the CLI's preprocessing + effects flow.
 
-    Returns ``{"out": path, "engine": name, "voice": resolved-voice}``.
+    Returns ``{"out": path, "engine": name, "voice": resolved-voice}``, plus a
+    ``note`` when ``lang`` was given for an engine that doesn't take one — MCP
+    has no stderr, so the caller only learns about a dropped argument through
+    the result.
     """
     # Lazy-import to avoid a circular import with cli at module load.
     from . import synth
@@ -244,6 +259,17 @@ def synthesize_text(
     if voice:
         synth_kwargs["voice"] = voice
 
+    # Only engines that declare SUPPORTS_LANG honor a lang kwarg; for the
+    # rest language is fixed by the voice/model, so drop it and say so.
+    note = None
+    if lang:
+        if getattr(ENGINE_CLASSES[engine_name], "SUPPORTS_LANG", False):
+            synth_kwargs["lang"] = lang
+        else:
+            note = (f"Ignored lang={lang!r}: {engine_name} does not take a "
+                    f"language setting — its language comes from the "
+                    f"voice/model.")
+
     # Engine-default effects (CLI applies these by default; match that here).
     effect_list = config.get("effects", {}).get("defaults", {}).get(engine_name, [])
 
@@ -266,11 +292,14 @@ def synthesize_text(
     if result is None:
         raise ValueError("No text to synthesize after preprocessing")
 
-    return {
+    out_result = {
         "out": result.out,
         "engine": engine_name,
         "voice": voice or eng_cfg.get("voice", ""),
     }
+    if note:
+        out_result["note"] = note
+    return out_result
 
 
 # ── MCP server wiring ───────────────────────────────────────────────────────
@@ -288,6 +317,7 @@ def run() -> None:
         voice: str | None = None,
         speed: float | None = None,
         out_path: str | None = None,
+        lang: str | None = None,
     ) -> dict:
         """Synthesize `text` to a WAV file.
 
@@ -300,15 +330,28 @@ def run() -> None:
           speed: Speech-rate multiplier; 1.0 is natural, 1.4 is fast, 0.8 is slow.
                  Uses the configured engine/defaults speed when omitted.
           out_path: Where to write the WAV. A temp file is used when omitted.
+          lang: Pronunciation language. Usually unnecessary — omit it. Only
+                kokoro and coqui take one; every other engine's language is
+                fixed by the voice/model, and a lang passed to them is
+                ignored (the result says so in a `note` field).
+                Vocabulary differs per engine:
+                  - kokoro: single misaki letters — `a` American English,
+                    `b` British English, `j` Japanese, `z` Mandarin. Kokoro
+                    voices already default to their own natural language
+                    (george → `b`, alpha/kumo → `j`, xiaobei → `z`), so pass
+                    lang only to force a voice to speak another language.
+                  - coqui: IETF codes — `en`, `es`, `fr`, … for multilingual
+                    models.
 
-        Returns: `{"out": path, "engine": name, "voice": resolved-voice}`,
-        or `{"error": "..."}` if synthesis fails (a missing engine venv or a
-        subprocess error). A failed synthesis returns an error result — it
-        must never take down the server process.
+        Returns: `{"out": path, "engine": name, "voice": resolved-voice}`
+        (plus `note` when an argument was ignored), or `{"error": "..."}` if
+        synthesis fails (a missing engine venv or a subprocess error). A
+        failed synthesis returns an error result — it must never take down
+        the server process.
         """
         try:
             return synthesize_text(text, engine=engine, voice=voice,
-                                   speed=speed, out_path=out_path)
+                                   speed=speed, out_path=out_path, lang=lang)
         except EngineError as e:
             return {"error": str(e)}
 
@@ -320,7 +363,9 @@ def run() -> None:
         omitted because their voices are user-installed model paths, not
         bare names.
 
-        Returns a list of `{name, engine, language, description}`.
+        Returns a list of `{name, engine, language, lang, description}`, where
+        `lang` is the code to pass to `synthesize` (empty for engines that
+        don't take one).
         """
         return list_voices_data(engine)
 
