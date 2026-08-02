@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import wave
 
@@ -31,7 +32,9 @@ def play_wav(path: str):
                 cmd += ["-nodisp", "-autoexit", "-loglevel", "quiet"]
             subprocess.run(cmd, check=False)
             return
-    print(f"[marmalade-tts] No audio player found. File saved: {path}")
+    # stderr, not stdout — --json / --print-path streams must stay parseable.
+    print(f"[marmalade-tts] No audio player found. File saved: {path}",
+          file=sys.stderr)
 
 
 def make_tmp_wav() -> str:

@@ -1419,3 +1419,16 @@ class TestSubtitleOutput:
         assert "duration" in payload
         # 0.5 s silence WAV → duration should be close to 0.5
         assert 0.45 <= payload["duration"] <= 0.55
+
+
+# ── playback stream hygiene ───────────────────────────────────────────────────
+
+def test_no_player_notice_goes_to_stderr(capsys):
+    """The fallback notice must not land on stdout — it would corrupt
+    --json / --print-path output."""
+    from marmalade_tts.playback import play_wav
+    with patch("marmalade_tts.playback.shutil.which", return_value=None):
+        play_wav("/tmp/nope.wav")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "No audio player found" in captured.err
