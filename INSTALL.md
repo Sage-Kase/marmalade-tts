@@ -55,7 +55,7 @@ For each selected engine, `marmalade-tts install` runs these steps
 |--------|------|--------|-----|-------------|--------|
 | kitten | `~/.local/share/kittentts-venv` | 3.11 | KittenTTS release wheel | — | auto (HuggingFace) |
 | kokoro | `~/.local/share/kokoro-venv` | system | `kokoro` `soundfile` | — | auto (HuggingFace) |
-| piper | `~/.local/share/piper-venv` | system | `piper-tts` | `espeak-ng` | `en_US-lessac-medium` (manifest) |
+| piper | `~/.local/share/piper-venv` | system | `piper-tts` | `espeak-ng` | 6 voices: en_US, de_DE, fr_FR, es_ES, nl_NL, it_IT (manifest) |
 | coqui | `~/.local/share/coqui-venv` | system | `coqui-tts` | — | auto (first use) |
 | pocket | `~/.local/share/pocket-tts-venv` | system | `pocket-tts` `scipy` | — | auto (HuggingFace) |
 | matcha | `~/.local/share/matcha-tts-venv` | **3.11** | `matcha-tts` | `espeak-ng` | auto (matcha-tts) |

@@ -1068,7 +1068,7 @@ unit tier.
 
 marmalade-tts is a unified wrapper — the real work is done by these engines:
 
-- **[Piper](https://github.com/rhasspy/piper)** — ONNX neural TTS by Michael Hansen / Rhasspy (MIT)
+- **[Piper](https://github.com/rhasspy/piper)** — ONNX neural TTS by Michael Hansen / Rhasspy (MIT). Voice models are downloaded from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices); each voice's upstream dataset license is recorded in `marmalade_tts/models.json`
 - **[Kokoro](https://github.com/hexgrad/kokoro)** — high-quality multilingual TTS by Hexgrad (Apache 2.0)
 - **[KittenTTS](https://github.com/KittenML/KittenTTS)** — fast lightweight neural TTS by KittenML (Apache 2.0)
 - **[Coqui TTS](https://github.com/coqui-ai/TTS)** — open-source TTS toolkit by Coqui AI (MPL 2.0)

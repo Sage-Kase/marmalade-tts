@@ -90,6 +90,24 @@ Very fast ONNX engine. Thousands of community voices.
 knobs — config-only by design (they're tuning knobs, not per-utterance
 choices). Browse voices at <https://rhasspy.github.io/piper-samples/>.
 
+**Installed voices:** `marmalade-tts install piper` fetches six voices
+into `~/.local/share/piper/voices/` (all medium quality, 22.05 kHz;
+`marmalade-tts piper --list` shows them with their locales):
+
+| Voice                  | Language | Upstream dataset license |
+|------------------------|----------|--------------------------|
+| `en_US-lessac-medium`  | English (US) | Blizzard 2013 research licence (Lessac) |
+| `de_DE-thorsten-medium`| German   | CC0 (Thorsten-Voice)     |
+| `fr_FR-siwis-medium`   | French   | CC-BY 4.0 (SIWIS)        |
+| `es_ES-davefx-medium`  | Spanish (Spain) | CC0 (OHF-Voice)   |
+| `nl_NL-pim-medium`     | Dutch    | CC0 (OHF-Voice)          |
+| `it_IT-paola-medium`   | Italian  | CC0-1.0                  |
+
+Piper has no Japanese voice: upstream ships none, and piper's espeak-ng
+G2P can't produce the per-mora pitch accent Japanese needs anyway — use
+kokoro (`--lang j`) for Japanese. The language lives in the voice model,
+not a flag: pick a voice, get its language.
+
 ```bash
 marmalade-tts piper --voice ~/voices/en_US-amy-medium.onnx "Hello"
 marmalade-tts config set engines.piper.noise_scale 0.85   # livelier

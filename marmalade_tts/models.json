@@ -1,13 +1,14 @@
 {
-  "_comment": "marmalade-tts model manifest. Each model-id declares the engine it belongs to and the language it speaks (IETF code), and maps to one or more files; each file has a dest path, an optional sha256, and an ordered list of download sources tried in turn. sha256 is null where an upstream-verified hash is not yet available — fill these once the marmalade/models mirror is hosted (the mirrored copy becomes the canonical hashed source). To add the mirror, prepend a source entry to each file's `sources` list. HF-auto-download engines (kitten, kokoro, pocket, coqui) and matcha (its own MATCHA_URLS) need no manifest entry — the installer's warm_cache covers them.",
+  "_comment": "marmalade-tts model manifest. Each model-id declares the engine it belongs to, the language it speaks (IETF code), and the upstream license of its voice/dataset; it maps to one or more files; each file has a dest path, an optional sha256, and an ordered list of download sources tried in turn. Piper sha256s are upstream-verified: .onnx hashes are the HuggingFace LFS oids, .onnx.json hashes were computed from content verified against the upstream git blob sha1. sha256 is null only where no upstream-verified hash exists (gdrive). HF-auto-download engines (kitten, kokoro, pocket, coqui) and matcha (its own MATCHA_URLS) need no manifest entry — the installer's warm_cache covers them.",
   "models": {
     "piper-en_US-lessac-medium": {
       "engine": "piper",
       "language": "en-US",
+      "license": "Blizzard 2013 research licence (Lessac dataset; model redistributed by rhasspy/piper-voices)",
       "files": [
         {
           "dest": "~/.local/share/piper/voices/en_US-lessac-medium.onnx",
-          "sha256": null,
+          "sha256": "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f",
           "sources": [
             {
               "type": "https",
@@ -17,7 +18,7 @@
         },
         {
           "dest": "~/.local/share/piper/voices/en_US-lessac-medium.onnx.json",
-          "sha256": null,
+          "sha256": "efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0",
           "sources": [
             {
               "type": "https",
@@ -27,9 +28,145 @@
         }
       ]
     },
+    "piper-de_DE-thorsten-medium": {
+      "engine": "piper",
+      "language": "de-DE",
+      "license": "CC0 (Thorsten-Voice dataset)",
+      "files": [
+        {
+          "dest": "~/.local/share/piper/voices/de_DE-thorsten-medium.onnx",
+          "sha256": "7e64762d8e5118bb578f2eea6207e1a35a8e0c30595010b666f983fc87bb7819",
+          "sources": [
+            {
+              "type": "https",
+              "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx"
+            }
+          ]
+        },
+        {
+          "dest": "~/.local/share/piper/voices/de_DE-thorsten-medium.onnx.json",
+          "sha256": "974adee790533adb273a1ac88f49027d2a1b8f0f2cf4905954a4791e79264e85",
+          "sources": [
+            {
+              "type": "https",
+              "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx.json"
+            }
+          ]
+        }
+      ]
+    },
+    "piper-fr_FR-siwis-medium": {
+      "engine": "piper",
+      "language": "fr-FR",
+      "license": "CC-BY-4.0 (SIWIS French Speech Synthesis Database)",
+      "files": [
+        {
+          "dest": "~/.local/share/piper/voices/fr_FR-siwis-medium.onnx",
+          "sha256": "641d1ab097da2b81128c076810edb052b385decc8be3381814802a64a73baf99",
+          "sources": [
+            {
+              "type": "https",
+              "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx"
+            }
+          ]
+        },
+        {
+          "dest": "~/.local/share/piper/voices/fr_FR-siwis-medium.onnx.json",
+          "sha256": "39479916c2db192b5ac9764daddd0c744d83e023ad890c6976c0633ae4df8959",
+          "sources": [
+            {
+              "type": "https",
+              "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx.json"
+            }
+          ]
+        }
+      ]
+    },
+    "piper-es_ES-davefx-medium": {
+      "engine": "piper",
+      "language": "es-ES",
+      "license": "CC0 (OHF-Voice voice-datasets)",
+      "files": [
+        {
+          "dest": "~/.local/share/piper/voices/es_ES-davefx-medium.onnx",
+          "sha256": "6658b03b1a6c316ee4c265a9896abc1393353c2d9e1bca7d66c2c442e222a917",
+          "sources": [
+            {
+              "type": "https",
+              "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx"
+            }
+          ]
+        },
+        {
+          "dest": "~/.local/share/piper/voices/es_ES-davefx-medium.onnx.json",
+          "sha256": "0e0dda87c732f6f38771ff274a6380d9252f327dca77aa2963d5fbdf9ec54842",
+          "sources": [
+            {
+              "type": "https",
+              "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx.json"
+            }
+          ]
+        }
+      ]
+    },
+    "piper-nl_NL-pim-medium": {
+      "engine": "piper",
+      "language": "nl-NL",
+      "license": "CC0 (OHF-Voice voice-datasets)",
+      "files": [
+        {
+          "dest": "~/.local/share/piper/voices/nl_NL-pim-medium.onnx",
+          "sha256": "403e58c3675c394f505c2428117bf34cc56e9542dcf6eadbdd3a84706c12e048",
+          "sources": [
+            {
+              "type": "https",
+              "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/nl/nl_NL/pim/medium/nl_NL-pim-medium.onnx"
+            }
+          ]
+        },
+        {
+          "dest": "~/.local/share/piper/voices/nl_NL-pim-medium.onnx.json",
+          "sha256": "08b58456ca00cf77123826b1712758f99d5fd19ddfb7ec7da8e1a715b047f642",
+          "sources": [
+            {
+              "type": "https",
+              "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/nl/nl_NL/pim/medium/nl_NL-pim-medium.onnx.json"
+            }
+          ]
+        }
+      ]
+    },
+    "piper-it_IT-paola-medium": {
+      "engine": "piper",
+      "language": "it-IT",
+      "license": "CC0-1.0 (Voice-Dataset-Italian, paolapersico1)",
+      "files": [
+        {
+          "dest": "~/.local/share/piper/voices/it_IT-paola-medium.onnx",
+          "sha256": "6fc918b5a0ea6137382833dddfa567bffbe6a5060c02043c87192ee59c04210c",
+          "sources": [
+            {
+              "type": "https",
+              "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/paola/medium/it_IT-paola-medium.onnx"
+            }
+          ]
+        },
+        {
+          "dest": "~/.local/share/piper/voices/it_IT-paola-medium.onnx.json",
+          "sha256": "aea19c0a7fce29fbc359b93f10e7902854401e4c95ae2ea328ae516b15d296cf",
+          "sources": [
+            {
+              "type": "https",
+              "url": "https://huggingface.co/rhasspy/piper-voices/resolve/main/it/it_IT/paola/medium/it_IT-paola-medium.onnx.json"
+            }
+          ]
+        }
+      ]
+    },
     "emojivoice-paige": {
       "engine": "emojivoice",
       "language": "en",
+      "license": "MIT (EmojiVoice checkpoints)",
       "files": [
         {
           "dest": "~/.local/share/emojivoice/models/emoji-hri-paige-inference.ckpt",
