@@ -133,6 +133,70 @@ def test_list_effects_flag(capsys):
     assert "cave" in captured.out
 
 
+# ── machine-readable listings (--json) ────────────────────────────────────────
+
+_LIST_CFG = {
+    "defaults": {"engine": "kokoro", "speed": 1.0, "play": False,
+                 "preprocessing": True},
+    "engines": {"kokoro": {"voice": "af_heart", "lang": "a", "daemon": False,
+                           "device": "cpu"}},
+}
+
+
+def test_list_effects_json(capsys):
+    import json
+    with patch("sys.argv", ["marmalade-tts", "--list-effects", "--json"]):
+        main()
+    data = json.loads(capsys.readouterr().out)
+    names = [e["name"] for e in data["effects"]]
+    assert "reverb" in names
+    assert "cave" in data["presets"]["builtin"]
+    assert data["presets"]["user"] == {}
+
+
+def test_list_effects_json_includes_user_presets(capsys):
+    import json
+    cfg = dict(_LIST_CFG, effects={"presets": {"my_voice": ["reverb=30"]}})
+    with patch("sys.argv", ["marmalade-tts", "--list-effects", "--json"]), \
+         patch("marmalade_tts.cli.cfg_mod.load", return_value=cfg):
+        main()
+    data = json.loads(capsys.readouterr().out)
+    assert data["presets"]["user"]["my_voice"] == ["reverb=30"]
+
+
+def test_list_voices_json(capsys):
+    import json
+    with patch("sys.argv", ["marmalade-tts", "kokoro", "--list", "--json"]), \
+         patch("marmalade_tts.cli.cfg_mod.load", return_value=_LIST_CFG):
+        main()
+    data = json.loads(capsys.readouterr().out)
+    assert data["engine"] == "kokoro"
+    names = [v["name"] for v in data["voices"]]
+    assert "george" in names
+    assert all(v["engine"] == "kokoro" for v in data["voices"])
+    assert all({"language", "description"} <= set(v) for v in data["voices"])
+
+
+def test_list_voices_json_uncatalogued_engine(capsys):
+    """piper voices are user-installed model paths — empty list plus a note."""
+    import json
+    with patch("sys.argv", ["marmalade-tts", "piper", "--list", "--json"]), \
+         patch("marmalade_tts.cli.cfg_mod.load", return_value=_LIST_CFG):
+        main()
+    data = json.loads(capsys.readouterr().out)
+    assert data["engine"] == "piper"
+    assert data["voices"] == []
+    assert "note" in data
+
+
+def test_list_voices_without_json_stays_textual(capsys):
+    with patch("sys.argv", ["marmalade-tts", "kokoro", "--list"]), \
+         patch("marmalade_tts.cli.cfg_mod.load", return_value=_LIST_CFG):
+        main()
+    out = capsys.readouterr().out
+    assert "Kokoro voices" in out
+
+
 # ── --list-rules ──────────────────────────────────────────────────────────────
 
 def test_list_rules_flag(capsys):

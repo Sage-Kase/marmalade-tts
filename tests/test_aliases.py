@@ -288,6 +288,26 @@ class TestListAliases:
         assert "narrator" in out
         assert "kokoro" in out
 
+    def test_list_aliases_json(self, capsys):
+        import json
+        cfg = _cfg_with_aliases({
+            "narrator": {"engine": "kokoro", "voice": "george", "speed": 0.95},
+        })
+        with patch("sys.argv", ["marmalade-tts", "--list-aliases", "--json"]), \
+             patch("marmalade_tts.cli.cfg_mod.load", return_value=cfg):
+            main()
+        data = json.loads(capsys.readouterr().out)
+        assert data["aliases"]["narrator"]["engine"] == "kokoro"
+        assert data["aliases"]["narrator"]["speed"] == 0.95
+
+    def test_list_aliases_json_empty(self, capsys):
+        import json
+        cfg = _cfg_with_aliases({})
+        with patch("sys.argv", ["marmalade-tts", "--list-aliases", "--json"]), \
+             patch("marmalade_tts.cli.cfg_mod.load", return_value=cfg):
+            main()
+        assert json.loads(capsys.readouterr().out) == {"aliases": {}}
+
     def test_list_aliases_with_empty_config(self, capsys):
         cfg = _cfg_with_aliases({})
         with patch("sys.argv", ["marmalade-tts", "--list-aliases"]), \

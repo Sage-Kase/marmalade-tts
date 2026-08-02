@@ -194,6 +194,30 @@ def resolve_out_paths(args, n: int, config: dict, parser):
             config.get("defaults", {}).get("play", True))
 
 
+def voices_json(engine_name: str) -> dict:
+    """Machine-readable voice listing. Used by `--list --json`.
+
+    Reuses the shipped voice catalog behind the MCP `list_voices` tool.
+    Engines whose voices are user-installed model paths or provider-hosted
+    (piper, coqui, matcha, api) aren't catalogued, so they come back with an
+    empty list plus a note pointing at the text listing."""
+    from .mcp_server import list_voices_data  # deferred — mcp_server imports cli
+    voices = list_voices_data(engine_name)
+    payload = {"engine": engine_name, "voices": voices}
+    if not voices:
+        payload["note"] = (
+            "No shipped voice catalog for this engine — its voices are "
+            "user-installed models or provider-hosted. Run --list without "
+            "--json to enumerate them."
+        )
+    return payload
+
+
+def aliases_json(aliases: dict) -> dict:
+    """Machine-readable alias listing. Used by `--list-aliases --json`."""
+    return {"aliases": {name: (spec or {}) for name, spec in (aliases or {}).items()}}
+
+
 def print_aliases(aliases: dict) -> None:
     """Pretty-print the configured aliases. Used by --list-aliases."""
     if not aliases:

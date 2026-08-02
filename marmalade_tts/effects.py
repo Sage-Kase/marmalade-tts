@@ -421,6 +421,20 @@ def apply_effects(in_path: str, out_path: str, effect_specs: list[str], config: 
                 pass
 
 
+def list_effects_data(user_presets: dict = None) -> dict:
+    """Machine-readable form of :func:`list_effects` — used by --list-effects --json."""
+    return {
+        "effects": [
+            {"name": name, "description": desc, "param": hint or None}
+            for name, (_, desc, hint) in EFFECTS.items()
+        ],
+        "presets": {
+            "builtin": {name: list(specs) for name, specs in BUILTIN_PRESETS.items()},
+            "user": {name: list(specs) for name, specs in (user_presets or {}).items()},
+        },
+    }
+
+
 def list_effects(user_presets: dict = None):
     """Print all available effects and presets."""
     print("Available effects:")

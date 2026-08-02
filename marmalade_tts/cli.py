@@ -10,6 +10,7 @@ The trailing re-exports keep test files (which patch
 """
 
 import argparse
+import json
 import os
 import sys
 import yaml
@@ -42,6 +43,8 @@ from .cli_helpers import (
     apply_effects_if_any,
     resolve_out_paths,
     print_aliases,
+    aliases_json,
+    voices_json,
     report_outputs,
     write_subtitles_for_results,
 )
@@ -638,7 +641,9 @@ Examples:
     parser.add_argument("--quiet", "-q", action="store_true",
                         help="Suppress all status output on stderr")
     parser.add_argument("--json", action="store_true",
-                        help="Print a JSON result object to stdout instead of status text")
+                        help="Print a JSON result object to stdout instead of "
+                             "status text. Also machine-readable output for "
+                             "--list, --list-effects and --list-aliases.")
     parser.add_argument("--print-path", action="store_true",
                         help="Print the output WAV path to stdout (useful for scripts)")
     parser.add_argument("--stdin", action="store_true",
@@ -700,12 +705,19 @@ def _run():
     if argv and argv[0] == "--list-effects":
         config_tmp = cfg_mod.load()
         user_presets = config_tmp.get("effects", {}).get("presets", {})
-        fx.list_effects(user_presets)
+        if "--json" in argv[1:]:
+            print(json.dumps(fx.list_effects_data(user_presets)))
+        else:
+            fx.list_effects(user_presets)
         return
 
     if argv and argv[0] == "--list-aliases":
         config_tmp = cfg_mod.load()
-        print_aliases(config_tmp.get("aliases") or {})
+        aliases = config_tmp.get("aliases") or {}
+        if "--json" in argv[1:]:
+            print(json.dumps(aliases_json(aliases)))
+        else:
+            print_aliases(aliases)
         return
 
     # ── Alias expansion + default-engine injection ──
@@ -776,7 +788,11 @@ def _run():
     # catches `marmalade-tts kokoro --list-aliases` etc.) ──
     if args.list_aliases:
         config = cfg_mod.load()
-        print_aliases(config.get("aliases") or {})
+        aliases = config.get("aliases") or {}
+        if args.json:
+            print(json.dumps(aliases_json(aliases)))
+        else:
+            print_aliases(aliases)
         return
 
     # ── Load config ──
@@ -803,7 +819,10 @@ def _run():
 
     # ── List mode ──
     if args.list:
-        engine.list_voices()
+        if args.json:
+            print(json.dumps(voices_json(engine_name)))
+        else:
+            engine.list_voices()
         return
 
     # ── Resolve text and voice ──
