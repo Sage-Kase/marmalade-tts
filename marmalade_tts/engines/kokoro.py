@@ -152,6 +152,9 @@ class KokoroEngine(Engine):
     # the plan condition across a boundary the model pauses at. Kokoro
     # opts in; kitten's approved renders keep the legacy merge.
     QUOTE_END_RUNS = True
+    # Chunk 0 may cut at a strong pause mark (em dash / pre-quote comma)
+    # for a P10-class start — see chunking.eager_head_cut (K1-5).
+    EAGER_HEAD = True
     STREAM_BANDS = STREAM_BANDS
 
     def __init__(self, cfg: dict):

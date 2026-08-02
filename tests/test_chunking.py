@@ -576,6 +576,42 @@ class TestPhPack:
         assert len(plan) == 1
         assert plan[0].text == run
 
+    def test_eager_head_cuts_at_an_em_dash_with_la1(self):
+        # K1-5: chunk 0 cuts in the dash's pause; one lookahead unit
+        # keeps "Wait" from rendering utterance-final (Max picked la1).
+        ph = "wˈAt — dˈɪd ju sˈi ðˈæt? " + " ".join(["wˈʌnwˈʌn"] * 12) + "."
+        plan = ph_stream_plan(ph, max_chars=500, keep_marks=".!?",
+                              eager_head=True)
+        assert plan[0].text == "wˈAt —"
+        assert plan[0].lookahead == "dˈɪd"
+        assert plan[0].context is None
+        assert plan[0].gap_after_ms == 300
+        assert plan[1].text == "dˈɪd ju sˈi ðˈæt?"
+        assert plan[1].context is None
+
+    def test_eager_head_cuts_before_a_quote_solo(self):
+        # The pre-quote comma carries the model's biggest rendered pause
+        # (389ms probed); the head renders solo — Max approved that seam.
+        ph = ('ðˈɛn ðə kˈipəɹ sˈɛd, "ðə ʃˈɪp ɪz kˈʌmɪŋ tˈu klˈOs '
+              'tə ðə ʃˈɔɹlˌIn!"')
+        plan = ph_stream_plan(ph, max_chars=500, keep_marks=".!?",
+                              eager_head=True)
+        assert plan[0].text == "ðˈɛn ðə kˈipəɹ sˈɛd,"
+        assert plan[0].lookahead is None
+        assert plan[0].gap_after_ms == 350
+        assert plan[1].text.startswith('"ðə ʃˈɪp')
+
+    def test_eager_head_off_by_default_and_capped(self):
+        ph = "wˈAt — dˈɪd ju sˈi ðˈæt?"
+        assert ph_stream_plan(ph, max_chars=500,
+                              keep_marks=".!?")[0].text == ph
+        # A mark past the 60-char cap is not an eager boundary.
+        far = " ".join(["wˈʌnwˈʌn"] * 8) + " — " + " ".join(
+            ["tˈuːtˈuː"] * 10) + "."
+        plan = ph_stream_plan(far, max_chars=500, keep_marks=".!?",
+                              eager_head=True)
+        assert plan[0].gap_after_ms != 300
+
     def test_runt_tail_merges_back(self):
         # K1-4b: a tiny final piece isn't worth a seam when its
         # predecessor can absorb it within tolerance.

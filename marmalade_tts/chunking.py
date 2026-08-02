@@ -498,6 +498,51 @@ def ph_pack(run: str, max_chars: int, step: int = 0,
     return subs
 
 
+# ── Eager chunk 0 (K1-5, Max's verdict 2026-08-01) ──────────────────────────
+# A tiny pause-rich chunk 0 is what makes 0.35s TTFA possible (P10's
+# "Stop!"). When the opening sentence is long, the same condition can be
+# manufactured by cutting chunk 0 at a mark the model already pauses on:
+# an em dash (probe: ~110ms natural pause) or the comma before a quote
+# (389ms — the biggest pause in the sentence). The cut behaves like a run
+# boundary — no context on what follows — and a gap top-up restores the
+# mark's beat while banking playback-gate buffer. A dash head keeps ONE
+# lookahead unit: rendered solo, "Wait —" gets utterance-final prosody
+# (F0 falls 329→207Hz + 67% final lengthening, probe_kokoro6.py); la1
+# flattens the fall at no measured render cost (la2 restores the full
+# rise for ~0.11s more — Max picked la1). A quote head renders solo: Max
+# approved that seam as-is.
+_EAGER_MIN = 5        # ph chars a head must reach to be worth cutting
+_EAGER_HEAD_MAX = 60  # absolute cap so streamed and saved plans agree
+                      # (the saved path plans with a flat max-size ramp)
+_EAGER_DASH_GAP_MS = 300   # natural ~110ms — Max expects a real beat
+_EAGER_QUOTE_GAP_MS = 350  # natural 389ms; the solo render keeps ~110
+_EAGER_DASH_LA = 1
+
+
+def eager_head_cut(run: str, target: int):
+    """Cut the utterance's first chunk at a strong pause mark — an em
+    dash, or a ``;:,``-final word right before an opening quote. Returns
+    ``(head, rest, gap_ms, lookahead_units)`` or None."""
+    cap = min(target * WHOLE_TOL, _EAGER_HEAD_MAX)
+    words = run.split()
+    acc: list[str] = []
+    for i, w in enumerate(words[:-1]):
+        acc.append(w)
+        pref = " ".join(acc)
+        if len(pref) > cap:
+            return None
+        if len(pref) < _EAGER_MIN or not any(
+                m in u for u in acc for m in _PH_STRESS):
+            continue
+        nxt = words[i + 1]
+        if w.endswith("—"):
+            return (pref, " ".join(words[i + 1:]),
+                    _EAGER_DASH_GAP_MS, _EAGER_DASH_LA)
+        if w[-1] in ";:," and nxt[0] in '"“\'':
+            return pref, " ".join(words[i + 1:]), _EAGER_QUOTE_GAP_MS, 0
+    return None
+
+
 def _run_style_refs(ph: str, ph_runs: list[str], text: str) -> list[int]:
     """Per-run style rows, stock-faithful: the upstream wrapper indexes the
     pack by each sentence's TEXT character count (verified in
@@ -523,7 +568,8 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
                    band: "StreamBand | None" = None,
                    text: "str | None" = None,
                    ph_rows: bool = False,
-                   split_quote_ends: bool = False) -> list[PhPiece]:
+                   split_quote_ends: bool = False,
+                   eager_head: bool = False) -> list[PhPiece]:
     """The full streaming plan for one phonemized utterance.
 
     ``text`` is the pre-phonemization utterance; when given, each run's
@@ -531,7 +577,8 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
     ``ph_rows`` instead derives each run's row from its own PHONEME length
     (kokoro indexes its pack by phoneme count — ``pack[len(ps)-1]``).
     With neither, ``style_ref`` stays None and the caller picks a row.
-    ``split_quote_ends`` is ph_sentence_runs' flag (engine opt-in)."""
+    ``split_quote_ends`` is ph_sentence_runs' flag, ``eager_head`` is
+    ``eager_head_cut`` (both engine opt-ins)."""
     if band is None:
         band = band_for_rtf(None)
     runs = ph_sentence_runs(ph, keep_marks, split_quote_ends)
@@ -543,12 +590,21 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
         rows = [None] * len(runs)
     pieces: list[PhPiece] = []
     for ri, run in enumerate(runs):
+        t = band.ramp[min(len(pieces), len(band.ramp) - 1)]
+        if eager_head and not pieces:
+            head = eager_head_cut(run, t)
+            if head:
+                pref, run, gap, la_units = head
+                la = (" ".join(run.split()[:la_units]) or None) \
+                    if la_units else None
+                pieces.append(PhPiece(pref, None, la, gap,
+                                      style_ref=rows[ri]))
+                t = band.ramp[min(len(pieces), len(band.ramp) - 1)]
         # A sentence within WHOLE_TOL of its ramp target stays whole
         # (K1-4b): a sentence end is a free unconditioned boundary with
         # the approved seam sound, so a modest overshoot beats cutting
         # into the sentence. The 35 floor keeps short-sentence openers
         # whole even at small early targets.
-        t = band.ramp[min(len(pieces), len(band.ramp) - 1)]
         if len(run) <= min(max(t * WHOLE_TOL, 35), max_chars):
             subs = [run]
         else:
