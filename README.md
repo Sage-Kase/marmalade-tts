@@ -1,7 +1,7 @@
 # 🍊 marmalade-tts
 
 <p align="center">
-  <img src="assets/mascot.png" alt="marmalade-tts mascot" width="220">
+  <img src="assets/icon.png" alt="marmalade-tts icon — a marmalade jar with sound waves" width="180">
 </p>
 
 A unified command-line interface for local text-to-speech synthesis.
