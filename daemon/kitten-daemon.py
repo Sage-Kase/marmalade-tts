@@ -26,6 +26,26 @@ MODEL_REPOS = {
 _raw_model = os.environ.get("KITTEN_MODEL", "nano")  # nano = config-default.yaml default
 MODEL_REPO = MODEL_REPOS.get(_raw_model, _raw_model)  # accept size name or full repo
 
+# Per-voice speed priors — Max's 2026-08-07 sweep picks, mirrored from the
+# Android app (KittenDirectEngine.SPEED_PRIORS) so both platforms speak at
+# the same pace. The voices differ in inherent pace, so upstream's flat HF
+# config value (0.8 everyone, 0.9 Hugo; empty for micro/mini) can't fit:
+# at a uniform prior Bella reads as slow-motion and Kiki as rushed. Keys
+# are upstream expr ids — every synth path resolves the friendly aliases
+# before its prior lookup. Applied to all model sizes: the 0.8 voice
+# identities and their too-fast-at-1.0 behavior are shared, and upstream's
+# empty micro/mini priors are an omission, not a calibration.
+SPEED_PRIORS = {
+    "expr-voice-2-f": 1.24,  # Bella
+    "expr-voice-2-m": 0.84,  # Jasper
+    "expr-voice-3-f": 0.92,  # Luna
+    "expr-voice-3-m": 0.88,  # Bruno
+    "expr-voice-4-f": 0.96,  # Rosie
+    "expr-voice-4-m": 0.84,  # Hugo
+    "expr-voice-5-f": 0.84,  # Kiki
+    "expr-voice-5-m": 1.25,  # Leo
+}
+
 
 # espeak-ng has no dictionary entry for "yeah" — its letter-to-sound
 # fallback emits /jɛh/ (a literal aspirated H, audibly "yeh-h").
@@ -561,6 +581,9 @@ def load_model():
     model = KittenTTS(MODEL_REPO)
     _patch_phonemizer(model.model)
     _materialize_voices(model.model)
+    # One override point: every synth path (phoneme-direct, capture-direct,
+    # generate_to_file fallback) reads priors off the wrapper instance.
+    model.model.speed_priors = dict(SPEED_PRIORS)
     if hasattr(model.model, "session"):
         model.model.session = _CaptureSession(model.model.session)
     return model
