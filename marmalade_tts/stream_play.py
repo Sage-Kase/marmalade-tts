@@ -164,7 +164,8 @@ def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict,
         ph_rows=(mode == "ph-sentence"),
         # Strict identity checks: mocked engines return truthy attributes.
         split_quote_ends=getattr(engine, "QUOTE_END_RUNS", None) is True,
-        eager_head=getattr(engine, "EAGER_HEAD", None) is True)
+        eager_head=getattr(engine, "EAGER_HEAD", None) is True,
+        clause_gaps=getattr(engine, "CLAUSE_GAPS", None) is True)
     if plan and banded:
         perfstats.set_band(engine_name, mkey, band.name)
     # Pieces carry per-run style rows; the second value is the fallback for

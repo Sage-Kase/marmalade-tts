@@ -192,7 +192,18 @@ _PH_SENTENCE_Q = re.compile(r"(?:(?<=[.!?])|(?<=[.!?][\"”’']))(?=\s)")
 _PH_TERMINAL_MARK = re.compile(r"([.!?])[\"”']*$")
 _PH_TERMINAL = re.compile(r"[.!?]+(?=[\"”']*$)")
 
-RUN_GAP_MS = 150      # silence between sentence runs
+RUN_GAP_MS = 150      # silence between sentence runs (uniform-gap engines)
+
+# Graded gaps for engines with CLAUSE_GAPS (the F rules — Max's 2026-08-07
+# kitten clause-split ear-lab, mirrored from marmalade-tts-android). Kitten
+# gives mid-render `,;:` only ~50 ms of pause vs ~390 ms for `.`, so every
+# clause mark a listener should hear must be a real render boundary. With
+# the renders' trimmed edges keeping ~135 ms of pause, effective silence ≈
+# gap + 135 ms: clause ≈ 215 ms (between comma and period), sentence ≈
+# 395 ms (matching the model's natural period — the uniform 150 ms made
+# chunked periods pause LESS than unchunked ones).
+CLAUSE_GAP_MS = 80        # after `;` `:` and the dialogue comma before a quote
+CLAUSE_SENT_GAP_MS = 260  # after a sentence end
 
 # Conditioning depth, counted in ESPEAK'S OWN ATOMIC UNITS — the
 # whitespace-separated tokens of the phoneme string — not in English
@@ -574,13 +585,38 @@ def _run_style_refs(ph: str, ph_runs: list[str], text: str) -> list[int]:
     return [round(len(r) * ratio) for r in ph_runs]
 
 
+def _clause_frags(run: str) -> list[str]:
+    """Split one sentence run at clause boundaries (F rules): after a word
+    ending `;` or `:`, and after a word ending `,` or `:` when the next
+    word opens a quote (the dialogue intro — `said, "…`). A mark buried
+    inside closing quotes (`…!" `) never cuts — the word's last char is
+    the quote, not the mark."""
+    words = run.split()
+    frags: list[str] = []
+    acc: list[str] = []
+    for i, w in enumerate(words):
+        acc.append(w)
+        nxt = words[i + 1] if i + 1 < len(words) else None
+        if nxt is None:
+            break
+        cut = (w[-1] in ";:"
+               or (w[-1] in ",:" and nxt[0] in '"“\''))
+        if cut:
+            frags.append(" ".join(acc))
+            acc = []
+    if acc:
+        frags.append(" ".join(acc))
+    return frags or [run]
+
+
 def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
                    gap_ms: int = RUN_GAP_MS,
                    band: "StreamBand | None" = None,
                    text: "str | None" = None,
                    ph_rows: bool = False,
                    split_quote_ends: bool = False,
-                   eager_head: bool = False) -> list[PhPiece]:
+                   eager_head: bool = False,
+                   clause_gaps: bool = False) -> list[PhPiece]:
     """The full streaming plan for one phonemized utterance.
 
     ``text`` is the pre-phonemization utterance; when given, each run's
@@ -589,7 +625,11 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
     (kokoro indexes its pack by phoneme count — ``pack[len(ps)-1]``).
     With neither, ``style_ref`` stays None and the caller picks a row.
     ``split_quote_ends`` is ph_sentence_runs' flag, ``eager_head`` is
-    ``eager_head_cut`` (both engine opt-ins)."""
+    ``eager_head_cut``, ``clause_gaps`` is the F graded-gap mode (all
+    engine opt-ins). With ``clause_gaps``, every clause mark becomes a
+    real boundary — ``CLAUSE_GAP_MS`` after clauses, ``CLAUSE_SENT_GAP_MS``
+    after sentences (``gap_ms`` is ignored) — and fragments keep their
+    sentence's style row."""
     if band is None:
         band = band_for_rtf(None)
     runs = ph_sentence_runs(ph, keep_marks, split_quote_ends)
@@ -599,8 +639,24 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
         rows = [max(0, len(r) - 1) for r in runs]
     else:
         rows = [None] * len(runs)
-    pieces: list[PhPiece] = []
+
+    # (unit_text, style_row, gap_after_final_subchunk_ms)
+    units: list[tuple] = []
     for ri, run in enumerate(runs):
+        last_run = ri == len(runs) - 1
+        if clause_gaps:
+            frags = _clause_frags(run)
+            for fi, f in enumerate(frags):
+                sentence_end = fi == len(frags) - 1
+                gap = (0 if last_run and sentence_end
+                       else CLAUSE_SENT_GAP_MS if sentence_end
+                       else CLAUSE_GAP_MS)
+                units.append((f, rows[ri], gap))
+        else:
+            units.append((run, rows[ri], 0 if last_run else gap_ms))
+
+    pieces: list[PhPiece] = []
+    for run, row, unit_gap in units:
         t = band.ramp[min(len(pieces), len(band.ramp) - 1)]
         if eager_head and not pieces:
             head = eager_head_cut(run, t)
@@ -608,8 +664,7 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
                 pref, run, gap, la_units = head
                 la = (" ".join(run.split()[:la_units]) or None) \
                     if la_units else None
-                pieces.append(PhPiece(pref, None, la, gap,
-                                      style_ref=rows[ri]))
+                pieces.append(PhPiece(pref, None, la, gap, style_ref=row))
                 t = band.ramp[min(len(pieces), len(band.ramp) - 1)]
         # A sentence within WHOLE_TOL of its ramp target stays whole
         # (K1-4b): a sentence end is a free unconditioned boundary with
@@ -622,7 +677,6 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
             ramp = (band.long_start
                     if band.long_start and not pieces else band.ramp)
             subs = ph_pack(run, max_chars, step=len(pieces), ramp=ramp)
-        last_run = ri == len(runs) - 1
         for i, s in enumerate(subs):
             last_sub = i == len(subs) - 1
             ctx = (" ".join(subs[i - 1].split()[-band.context_units:])
@@ -630,8 +684,8 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
             la = (" ".join(subs[i + 1].split()[:band.lookahead_units])
                   if not last_sub and band.lookahead_units else None)
             pieces.append(PhPiece(
-                s, ctx, la, gap_ms if last_sub and not last_run else 0,
-                style_ref=rows[ri]))
+                s, ctx, la, unit_gap if last_sub else 0,
+                style_ref=row))
     return pieces
 
 

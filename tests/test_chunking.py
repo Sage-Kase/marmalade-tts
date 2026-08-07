@@ -723,6 +723,63 @@ class TestPhStreamPlan:
         assert ph_stream_plan("   ", max_chars=500) == []
 
 
+class TestClauseGaps:
+    """The F rules (Max's 2026-08-07 ear-lab pick): every clause mark is a
+    real boundary; graded gaps; fragments keep their sentence's row."""
+
+    # "The Lord is my shepherd; I shall not want." (terminal . → ,)
+    PH_PSALM = "ðə lˈɔːɹd ɪz maɪ ʃˈɛpɚd; aɪ ʃˈæl nˌɑːt wˈɑːnt."
+
+    def test_clause_mark_becomes_a_boundary_with_graded_gaps(self):
+        from marmalade_tts.chunking import CLAUSE_GAP_MS
+        plan = ph_stream_plan(self.PH_PSALM, max_chars=500,
+                              clause_gaps=True)
+        assert [p.text for p in plan] == [
+            "ðə lˈɔːɹd ɪz maɪ ʃˈɛpɚd;", "aɪ ʃˈæl nˌɑːt wˈɑːnt,"]
+        assert plan[0].gap_after_ms == CLAUSE_GAP_MS
+        assert plan[-1].gap_after_ms == 0  # nothing after the utterance
+
+    def test_sentence_ends_get_the_big_gap(self):
+        from marmalade_tts.chunking import (CLAUSE_GAP_MS,
+                                            CLAUSE_SENT_GAP_MS)
+        plan = ph_stream_plan(PH_DIALOGUE, max_chars=500, clause_gaps=True)
+        sent_gaps = [p.gap_after_ms for p in plan[:-1]]
+        assert CLAUSE_SENT_GAP_MS in sent_gaps
+        assert plan[-1].gap_after_ms == 0
+
+    def test_fragments_share_their_sentence_row(self):
+        text = "The Lord is my shepherd; I shall not want."
+        plan = ph_stream_plan(self.PH_PSALM, max_chars=500,
+                              clause_gaps=True, text=text)
+        assert [p.style_ref for p in plan] == [len(text), len(text)]
+
+    def test_dialogue_comma_before_quote_cuts(self):
+        from marmalade_tts.chunking import _clause_frags
+        assert _clause_frags('ðɛn ðə kˈiːpɚ sˈɛd, "ðə ʃˈɪp ɪz kˈʌmɪŋ,') == [
+            'ðɛn ðə kˈiːpɚ sˈɛd,', '"ðə ʃˈɪp ɪz kˈʌmɪŋ,']
+
+    def test_plain_commas_do_not_cut(self):
+        from marmalade_tts.chunking import _clause_frags
+        run = "jˈeɪ, ðO aɪ wˈɔːk θɹuː ðə vˈæli, aɪ fˈɪɹ nO ˈiːvəl,"
+        assert _clause_frags(run) == [run]
+
+    def test_mark_inside_closing_quotes_does_not_cut(self):
+        from marmalade_tts.chunking import _clause_frags
+        run = '"stˈɑːp!" hiː ʃˈaʊɾᵻd,'
+        assert _clause_frags(run) == [run]
+
+    def test_off_by_default_keeps_uniform_gaps(self):
+        from marmalade_tts.chunking import RUN_GAP_MS
+        plan = ph_stream_plan(self.PH_PSALM, max_chars=500)
+        assert len(plan) == 1 or all(
+            p.gap_after_ms in (0, RUN_GAP_MS) for p in plan)
+
+    def test_kitten_engine_opts_in(self):
+        from marmalade_tts.engines.kitten import KittenEngine
+        assert KittenEngine.CLAUSE_GAPS is True
+        assert KittenEngine.QUOTE_END_RUNS is True
+
+
 class TestPadWavEnd:
     def test_appends_exact_silence(self, tmp_path):
         p = str(tmp_path / "a.wav")
