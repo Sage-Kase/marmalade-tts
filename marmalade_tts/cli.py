@@ -889,7 +889,7 @@ def _run():
         if lang == "auto" and engine_name != "kokoro":
             parser.error(
                 f"--lang auto is only supported by the kokoro engine "
-                f"(got --engine {engine_name}). Pass a concrete language "
+                f"(engine is {engine_name}). Pass a concrete language "
                 f"code instead.")
         if getattr(engine, "SUPPORTS_LANG", False):
             synth_kwargs["lang"] = lang
