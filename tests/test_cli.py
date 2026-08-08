@@ -857,6 +857,86 @@ class TestPassthroughFlags:
         assert supports == {"kokoro", "coqui"}
 
 
+# ── --lang auto ───────────────────────────────────────────────────────────────
+
+class TestLangAuto:
+    """`--lang auto` detects per utterance; "auto" never reaches an engine."""
+
+    def test_auto_resolves_to_a_concrete_letter(self):
+        received = {}
+
+        class FakeEngine:
+            SUPPORTS_LANG = True
+            lang = None
+            voice = "af_heart"
+            def __init__(self, cfg):
+                pass
+            def synthesize(self, text, out_path, **kwargs):
+                received["kwargs"] = kwargs
+
+        fake_config = {
+            "defaults": {"engine": "kokoro", "speed": 1.0, "play": False,
+                         "preprocessing": False},
+            "engines": {"kokoro": {"voice": "af_heart", "daemon": False,
+                                   "device": "cpu"}},
+            "presets": {},
+        }
+        argv = ["marmalade-tts", "kokoro", "--lang", "auto", "--text",
+                "Votre téléchargement est terminé et le fichier est prêt."]
+        with patch("sys.argv", argv), \
+             patch("marmalade_tts.cli.cfg_mod.load", return_value=fake_config), \
+             patch("marmalade_tts.cli.make_tmp_wav", return_value="/tmp/auto.wav"), \
+             patch("marmalade_tts.cli.play_wav"), \
+             patch("marmalade_tts.cli.os.unlink"), \
+             patch("marmalade_tts.cli.os.path.exists", return_value=True), \
+             patch.dict("marmalade_tts.cli.ENGINE_CLASSES", {"kokoro": FakeEngine}):
+            main()
+
+        assert received["kwargs"].get("lang") == "f"
+
+    def test_auto_rejected_for_non_kokoro_engine(self):
+        fake_config = {
+            "defaults": {"engine": "coqui", "speed": 1.0, "play": False,
+                         "preprocessing": False},
+            "engines": {"coqui": {"model": "m", "daemon": False,
+                                  "device": "cpu"}},
+            "presets": {},
+        }
+
+        class FakeCoqui:
+            SUPPORTS_LANG = True
+            def __init__(self, cfg):
+                pass
+            def synthesize(self, *a, **kw):
+                raise AssertionError("must not synthesize")
+
+        with patch("sys.argv", ["marmalade-tts", "coqui", "--lang", "auto",
+                                "--text", "hello"]), \
+             patch("marmalade_tts.cli.cfg_mod.load", return_value=fake_config), \
+             patch("marmalade_tts.cli.make_tmp_wav", return_value="/tmp/auto.wav"), \
+             patch("marmalade_tts.cli.play_wav"), \
+             patch.dict("marmalade_tts.cli.ENGINE_CLASSES", {"coqui": FakeCoqui}), \
+             pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code != 0
+
+    def test_batch_detects_per_line_without_leaking(self):
+        """Each line gets its own detection; the shared synth_kwargs dict
+        must not carry the first line's language into the second."""
+        cfg = _fake_synth_config()
+        cfg["engines"]["kokoro"].pop("lang", None)
+        argv = ["marmalade-tts", "kokoro", "--no-play", "--batch",
+                "--lang", "auto", "--text",
+                "Votre téléchargement est terminé et le fichier est prêt.\n"
+                "Su descarga ha terminado y el archivo ya está listo."]
+        with _BatchHarness(argv, cfg=cfg) as h:
+            main()
+
+        assert h.synth.call_count == 2
+        langs = [c.kwargs.get("lang") for c in h.synth.call_args_list]
+        assert langs == ["f", "e"]
+
+
 # ── Scripting / agent flags ───────────────────────────────────────────────────
 
 def _fake_synth_config(overrides=None):

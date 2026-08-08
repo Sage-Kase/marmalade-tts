@@ -38,6 +38,19 @@ class TestResolveLang:
         eng = make_engine({})
         assert eng._resolve_lang("xx_mystery", None) == "a"
 
+    def test_auto_never_reaches_the_model(self):
+        """"auto" is resolved at the utterance boundary. If a caller ever
+        misses that, degrade to the no-lang precedence instead of shipping
+        the literal string to the daemon."""
+        eng = make_engine({})
+        assert eng._resolve_lang("bm_george", "auto") == "b"
+        assert eng._resolve_lang("xx_mystery", "auto") == "a"
+
+    def test_auto_in_config_never_reaches_the_model(self):
+        eng = make_engine({"lang": "auto"})
+        assert eng._resolve_lang("jm_kumo", None) == "j"
+        assert eng._resolve_lang("xx_mystery", None) == "a"
+
 
 class TestVoiceHelpers:
     def test_bare_name_resolves(self):

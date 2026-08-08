@@ -470,6 +470,11 @@ class TestDaemonEnv:
         with self._with_cfg({"engines": {"kokoro": {"lang": "b"}}}):
             assert daemon_mod._daemon_env("kokoro") == {"KOKORO_LANG": "b"}
 
+    def test_kokoro_auto_lang_warms_on_american(self):
+        # "auto" is a per-utterance request, not a preload language.
+        with self._with_cfg({"engines": {"kokoro": {"lang": "auto"}}}):
+            assert daemon_mod._daemon_env("kokoro") == {"KOKORO_LANG": "a"}
+
     def test_piper_model_from_config_expands_user(self):
         with self._with_cfg({"engines": {"piper": {"model": "~/v/foo.onnx"}}}):
             env = daemon_mod._daemon_env("piper")

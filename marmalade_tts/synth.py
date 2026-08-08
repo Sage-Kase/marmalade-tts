@@ -301,6 +301,12 @@ def synthesize_one(
     if not processed.strip():
         return None
 
+    # ── Language ──
+    # `--lang auto` resolves here, once per utterance, on the preprocessed
+    # text — never per chunk, and never against the raw batch input.
+    from . import langdetect
+    synth_kwargs = langdetect.resolve_auto_lang(engine, processed, synth_kwargs)
+
     # ── Synthesis + effects ──
     from . import chunking
     max_chars = chunking.resolve_max_chars(engine, eng_cfg)

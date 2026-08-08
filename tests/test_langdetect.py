@@ -111,3 +111,52 @@ def test_resolve_auto_lang_config_auto_never_leaks():
     eng.lang = "auto"
     out = langdetect.resolve_auto_lang(eng, "OK", {})
     assert out.get("lang") != "auto"
+
+
+def _silent_wav(path: str, duration_s: float = 0.1, rate: int = 22050):
+    import wave
+    frames = int(round(duration_s * rate))
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * frames)
+
+
+def test_detection_runs_once_per_utterance_not_per_chunk(tmp_path, monkeypatch):
+    """Detection is an utterance-level decision. A chunked render must not
+    re-detect (and possibly re-decide) language mid-utterance."""
+    from unittest.mock import MagicMock
+    from marmalade_tts.synth import synthesize_one
+
+    calls = []
+
+    def counting_detect(text):
+        calls.append(text)
+        return "fr"
+
+    monkeypatch.setattr(langdetect, "detect", counting_detect)
+
+    engine = MagicMock()
+    engine.MAX_CHARS = 30
+    engine.lang = None
+    engine.synthesize.side_effect = (
+        lambda text, out_path, **kw: _silent_wav(out_path, duration_s=0.1)
+    )
+
+    text = "First sentence here. Second sentence here. Third sentence here."
+    out = str(tmp_path / "combined.wav")
+
+    synthesize_one(
+        text, out,
+        engine=engine, engine_name="kokoro",
+        eng_cfg={}, config={"defaults": {"preprocessing": False}},
+        synth_kwargs={"lang": "auto"}, effect_list=[],
+        preprocess_mode=False, custom_rules=None,
+    )
+
+    assert engine.synthesize.call_count >= 2   # it really did chunk
+    assert len(calls) == 1
+    assert calls[0] == text
+    langs = {c.kwargs.get("lang") for c in engine.synthesize.call_args_list}
+    assert langs == {"f"}

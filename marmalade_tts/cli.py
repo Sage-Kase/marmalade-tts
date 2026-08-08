@@ -886,6 +886,11 @@ def _run():
         synth_kwargs["voice"] = voice
     lang = args.lang or (alias_overrides.get("lang") if alias_overrides else None)
     if lang:
+        if lang == "auto" and engine_name != "kokoro":
+            parser.error(
+                f"--lang auto is only supported by the kokoro engine "
+                f"(got --engine {engine_name}). Pass a concrete language "
+                f"code instead.")
         if getattr(engine, "SUPPORTS_LANG", False):
             synth_kwargs["lang"] = lang
         else:

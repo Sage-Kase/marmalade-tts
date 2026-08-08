@@ -179,8 +179,12 @@ def _daemon_env(engine: str) -> dict:
         return {"KITTEN_MODEL": str(eng.get("model_size", "nano"))}
     if engine == "kokoro":
         # Preload/warm-start language only — the kokoro daemon serves any
-        # lang, building the extra G2P front end on first use.
-        return {"KOKORO_LANG": str(eng.get("lang") or "a")}
+        # lang, building the extra G2P front end on first use. "auto" is a
+        # per-utterance request, not a language: warm on "a".
+        lang = eng.get("lang")
+        if not lang or lang == "auto":
+            lang = "a"
+        return {"KOKORO_LANG": str(lang)}
     if engine == "piper":
         model = eng.get("model") or "~/.local/share/piper/voices/en_US-lessac-medium.onnx"
         return {"PIPER_MODEL": os.path.expanduser(model)}

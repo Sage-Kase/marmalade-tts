@@ -16,6 +16,12 @@ language is configured, that's what we use. Override order:
   2. ``engines.kokoro.lang`` in config.yaml
   3. The voice's natural language
   4. Fallback to American English (``a``)
+
+``auto`` (either source) means "detect the language from the text", once
+per utterance, in :mod:`marmalade_tts.langdetect`. Detection only ever
+changes the pronunciation language, never the voice; a detected English
+resolves to the voice's own English variant, and an uncertain detection
+falls back to the precedence above.
 """
 
 import os
@@ -180,10 +186,15 @@ class KokoroEngine(Engine):
 
         --lang flag > config engines.kokoro.lang > voice's natural language
         > fallback "a".
+
+        "auto" is resolved at the utterance boundary (langdetect.
+        resolve_auto_lang); seeing it here means a caller bypassed that, so
+        it degrades to the no-lang precedence rather than reaching the
+        model.
         """
-        if cli_lang:
+        if cli_lang and cli_lang != "auto":
             return cli_lang
-        if self.lang:
+        if self.lang and self.lang != "auto":
             return self.lang
         return natural_lang(canonical_voice) or "a"
 
