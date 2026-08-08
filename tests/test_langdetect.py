@@ -139,14 +139,15 @@ class _FakeEngine:
 
 def test_resolve_auto_lang_passthrough_when_not_auto():
     kwargs = {"lang": "b", "speed": 1.0}
-    assert langdetect.resolve_auto_lang(_FakeEngine(), "hello", kwargs) is kwargs
+    assert langdetect.resolve_auto_lang(_FakeEngine(), "kokoro", "hello",
+                                        kwargs) is kwargs
 
 
 def test_resolve_auto_lang_detects_and_does_not_mutate():
     kwargs = {"lang": "auto", "voice": "heart", "speed": 1.0}
     out = langdetect.resolve_auto_lang(
-        _FakeEngine(), "Votre téléchargement est terminé et le fichier est prêt.",
-        kwargs)
+        _FakeEngine(), "kokoro",
+        "Votre téléchargement est terminé et le fichier est prêt.", kwargs)
     assert out["lang"] == "f"
     assert kwargs["lang"] == "auto"      # shared dict untouched
 
@@ -154,15 +155,15 @@ def test_resolve_auto_lang_detects_and_does_not_mutate():
 def test_resolve_auto_lang_english_uses_voice_variant():
     kwargs = {"lang": "auto", "voice": "george"}   # bm_george → British
     out = langdetect.resolve_auto_lang(
-        _FakeEngine(), "The download has finished and your file is ready.",
-        kwargs)
+        _FakeEngine(), "kokoro",
+        "The download has finished and your file is ready.", kwargs)
     assert out["lang"] == "b"
 
 
 def test_resolve_auto_lang_uncertain_drops_lang():
     """Uncertain detection falls back to the engine's own precedence."""
     kwargs = {"lang": "auto", "voice": "heart"}
-    out = langdetect.resolve_auto_lang(_FakeEngine(), "OK", kwargs)
+    out = langdetect.resolve_auto_lang(_FakeEngine(), "kokoro", "OK", kwargs)
     assert "lang" not in out
 
 
@@ -171,15 +172,108 @@ def test_resolve_auto_lang_from_engine_config():
     eng = _FakeEngine()
     eng.lang = "auto"
     out = langdetect.resolve_auto_lang(
-        eng, "Il download è terminato e il file è pronto per essere aperto.", {})
+        eng, "kokoro",
+        "Il download è terminato e il file è pronto per essere aperto.", {})
     assert out["lang"] == "i"
 
 
 def test_resolve_auto_lang_config_auto_never_leaks():
     eng = _FakeEngine()
     eng.lang = "auto"
-    out = langdetect.resolve_auto_lang(eng, "OK", {})
+    out = langdetect.resolve_auto_lang(eng, "kokoro", "OK", {})
     assert out.get("lang") != "auto"
+
+
+# ── kitten: detection moves the phonemizer, never the voice ──────────────────
+#
+# Max, 2026-08-08: Kitten's accented non-English is better than nothing, and
+# on the CLI the user named the engine, so there is no reroute to make. The
+# mirror of Android's UtteranceLanguageTest.
+
+class _FakeKitten:
+    name = "kitten"
+    lang = None
+    voice = "Bella"
+
+
+@pytest.mark.parametrize("detected,expected", [
+    ("en", "en-us"),     # never bare "en" — espeak has no such voice
+    ("es", "es"),
+    ("fr", "fr-fr"),     # phonemizer's IETF-ish names, not file basenames
+    ("it", "it"),
+    ("pt", "pt-br"),
+    ("ja", "ja"),
+    ("hi", "hi"),
+    ("zh", "en-us"),     # tone marks aren't in Kitten's vocab; see _ESPEAK_LANG
+])
+def test_to_espeak_lang(detected, expected):
+    assert langdetect.to_espeak_lang(detected) == expected
+
+
+def test_kitten_auto_english_takes_the_english_path():
+    """The whole point of the byte-identical requirement: an English
+    utterance under `--lang auto` phonemizes with en-us, exactly as it did
+    before detection existed."""
+    kwargs = {"lang": "auto", "voice": "Bella"}
+    out = langdetect.resolve_auto_lang(
+        _FakeKitten(), "kitten",
+        "The download has finished and your file is ready.", kwargs)
+    assert out["lang"] == "en-us"
+    assert out["voice"] == "Bella"
+
+
+def test_kitten_auto_spanish_keeps_the_voice_and_moves_espeak():
+    kwargs = {"lang": "auto", "voice": "Bella"}
+    out = langdetect.resolve_auto_lang(
+        _FakeKitten(), "kitten",
+        "La descarga ha terminado y el archivo está listo para abrirse.",
+        kwargs)
+    assert out["lang"] == "es"
+    assert out["voice"] == "Bella"      # no reroute: the voice the user picked
+    assert kwargs["lang"] == "auto"     # shared batch dict untouched
+
+
+def test_kitten_auto_uncertain_falls_back_to_english():
+    """Dropping the key leaves the daemon's own en-us default — the English
+    path, not a guess."""
+    out = langdetect.resolve_auto_lang(
+        _FakeKitten(), "kitten", "OK", {"lang": "auto"})
+    assert "lang" not in out
+
+
+def test_kitten_explicit_lang_is_not_touched():
+    kwargs = {"lang": "es", "voice": "Bella"}
+    assert langdetect.resolve_auto_lang(
+        _FakeKitten(), "kitten", "hello", kwargs) is kwargs
+
+
+def test_auto_engines_is_kokoro_and_kitten():
+    assert langdetect.AUTO_ENGINES == {"kokoro", "kitten"}
+
+
+def test_unknown_engine_drops_auto_rather_than_leaking_it():
+    """Belt and braces: the CLI rejects auto on other engines, but if one
+    ever arrives here the sentinel must not continue downstream."""
+    class _FakePiper:
+        name = "piper"
+        lang = None
+    out = langdetect.resolve_auto_lang(
+        _FakePiper(), "piper", "The download has finished.", {"lang": "auto"})
+    assert "lang" not in out
+
+
+@pytest.mark.parametrize("given,expected", [
+    ("es", "es"),
+    ("fr", "fr-fr"),       # ISO code the detector would emit → espeak's name
+    ("pt", "pt-br"),
+    ("en", "en-us"),
+    ("cmn", "cmn"),        # espeak's own names pass through untranslated
+    ("en-gb", "en-gb"),
+    (None, None),
+])
+def test_kitten_espeak_voice_translation(given, expected):
+    from marmalade_tts.engines.kitten import espeak_voice
+    assert espeak_voice(given) == expected
 
 
 def _silent_wav(path: str, duration_s: float = 0.1, rate: int = 22050):

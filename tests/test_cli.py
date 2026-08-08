@@ -854,7 +854,7 @@ class TestPassthroughFlags:
         from marmalade_tts.cli import ENGINE_CLASSES
         supports = {name for name, cls in ENGINE_CLASSES.items()
                     if getattr(cls, "SUPPORTS_LANG", False)}
-        assert supports == {"kokoro", "coqui"}
+        assert supports == {"kokoro", "kitten", "coqui"}
 
 
 # ── --lang auto ───────────────────────────────────────────────────────────────
@@ -894,31 +894,70 @@ class TestLangAuto:
 
         assert received["kwargs"].get("lang") == "f"
 
-    def test_auto_rejected_for_non_kokoro_engine(self):
+    @pytest.mark.parametrize("engine_name", ["coqui", "piper"])
+    def test_auto_rejected_for_engine_without_a_resolver(self, engine_name):
+        """Only kokoro and kitten can act on a detected language. Anywhere
+        else "auto" is an error, not a silently-dropped flag."""
         fake_config = {
-            "defaults": {"engine": "coqui", "speed": 1.0, "play": False,
+            "defaults": {"engine": engine_name, "speed": 1.0, "play": False,
                          "preprocessing": False},
-            "engines": {"coqui": {"model": "m", "daemon": False,
-                                  "device": "cpu"}},
+            "engines": {engine_name: {"model": "m", "daemon": False,
+                                      "device": "cpu"}},
             "presets": {},
         }
 
-        class FakeCoqui:
+        class FakeEngine:
             SUPPORTS_LANG = True
             def __init__(self, cfg):
                 pass
             def synthesize(self, *a, **kw):
                 raise AssertionError("must not synthesize")
 
-        with patch("sys.argv", ["marmalade-tts", "coqui", "--lang", "auto",
+        with patch("sys.argv", ["marmalade-tts", engine_name, "--lang", "auto",
                                 "--text", "hello"]), \
              patch("marmalade_tts.cli.cfg_mod.load", return_value=fake_config), \
              patch("marmalade_tts.cli.make_tmp_wav", return_value="/tmp/auto.wav"), \
              patch("marmalade_tts.cli.play_wav"), \
-             patch.dict("marmalade_tts.cli.ENGINE_CLASSES", {"coqui": FakeCoqui}), \
+             patch.dict("marmalade_tts.cli.ENGINE_CLASSES",
+                        {engine_name: FakeEngine}), \
              pytest.raises(SystemExit) as exc:
             main()
         assert exc.value.code != 0
+
+    def test_auto_accepted_for_kitten_and_resolves_an_espeak_voice(self):
+        """Kitten keeps the voice and only moves the phonemizer (Max,
+        2026-08-08) — so `auto` must pass validation, not error out."""
+        received = {}
+
+        class FakeKitten:
+            SUPPORTS_LANG = True
+            lang = None
+            voice = "Bella"
+            def __init__(self, cfg):
+                pass
+            def synthesize(self, text, out_path, **kwargs):
+                received["kwargs"] = kwargs
+
+        fake_config = {
+            "defaults": {"engine": "kitten", "speed": 1.0, "play": False,
+                         "preprocessing": False},
+            "engines": {"kitten": {"voice": "Bella", "daemon": False}},
+            "presets": {},
+        }
+        argv = ["marmalade-tts", "kitten", "--lang", "auto",
+                "--voice", "Bella", "--text",
+                "La descarga ha terminado y el archivo está listo para abrirse."]
+        with patch("sys.argv", argv), \
+             patch("marmalade_tts.cli.cfg_mod.load", return_value=fake_config), \
+             patch("marmalade_tts.cli.make_tmp_wav", return_value="/tmp/auto.wav"), \
+             patch("marmalade_tts.cli.play_wav"), \
+             patch("marmalade_tts.cli.os.unlink"), \
+             patch("marmalade_tts.cli.os.path.exists", return_value=True), \
+             patch.dict("marmalade_tts.cli.ENGINE_CLASSES", {"kitten": FakeKitten}):
+            main()
+
+        assert received["kwargs"].get("lang") == "es"
+        assert received["kwargs"].get("voice") == "Bella"
 
     def test_batch_detects_per_line_without_leaking(self):
         """Each line gets its own detection; the shared synth_kwargs dict

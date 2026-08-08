@@ -37,6 +37,33 @@ _KOKORO_LANG = {
     "ja": "j", "zh": "z", "hi": "h",
 }
 
+# Every code :func:`detect` can return — the trigram table's five Latin
+# languages plus the three the script check decides.
+DETECTED_LANGS = frozenset(
+    ("en", "es", "fr", "it", "pt", "ja", "zh", "hi"))
+
+# The espeak voice kitten phonemizes with when nothing else is asked for.
+# The daemon carries the same constant (it runs in its own venv and can't
+# import this package); the two must agree.
+KITTEN_ESPEAK_DEFAULT = "en-us"
+
+# Detected language -> the espeak voice the kitten daemon phonemizes with.
+# These are `phonemizer`'s EspeakBackend language names, which are IETF-ish
+# ("fr-fr", "pt-br") and disagree with raw espeak's file basenames both
+# ways — the same list Android's LangDetector.espeakCodeFor returns, so a
+# sentence phonemizes identically on both platforms.
+#
+# Chinese maps to English rather than espeak's "cmn": Mandarin IPA is
+# tone-marked, and Kitten's token vocabulary has no tone marks, so the
+# tones are dropped and what reaches the model is a mangled syllable
+# stream. Reading the Han through English rules is no worse and matches
+# Android. `--lang cmn` still reaches espeak verbatim for anyone who
+# wants to hear it.
+_ESPEAK_LANG = {
+    "es": "es", "fr": "fr-fr", "it": "it", "pt": "pt-br",
+    "ja": "ja", "hi": "hi", "zh": "en-us",
+}
+
 
 def _is_kana(cp: int) -> bool:
     return 0x3040 <= cp <= 0x30FF or 0x31F0 <= cp <= 0x31FF or 0xFF66 <= cp <= 0xFF9F
@@ -152,7 +179,44 @@ def to_kokoro_lang(detected: str, natural: str | None) -> str:
     return _KOKORO_LANG[detected]
 
 
-def resolve_auto_lang(engine, text: str, synth_kwargs: dict) -> dict:
+def to_espeak_lang(detected: str) -> str:
+    """Map a detected language to the espeak voice kitten phonemizes with.
+
+    English never leaves ``en-us``: Kitten's model is trained on American
+    IPA and there is no British Kitten voice to take a region from.
+    """
+    return _ESPEAK_LANG.get(detected, KITTEN_ESPEAK_DEFAULT)
+
+
+def _resolve_kokoro(engine, detected: str, synth_kwargs: dict) -> str:
+    from .engines import kokoro as kokoro_engine
+    voice = synth_kwargs.get("voice") or getattr(engine, "voice", None)
+    natural = (kokoro_engine.natural_lang(kokoro_engine.resolve_voice(voice))
+               if voice else None)
+    return to_kokoro_lang(detected, natural)
+
+
+def _resolve_kitten(engine, detected: str, synth_kwargs: dict) -> str:
+    # No engine reroute: on the CLI the user names the engine, so detection
+    # only ever moves the phonemizer. The Kitten voice stays and reads the
+    # detected language's IPA — accented and imperfect, and better than
+    # reading Spanish through English letter rules (Max, 2026-08-08).
+    return to_espeak_lang(detected)
+
+
+# Engines that can act on `--lang auto`, and how each turns a detected
+# language into its own vocabulary. An engine absent here rejects "auto"
+# at the CLI/MCP boundary.
+_RESOLVERS = {
+    "kokoro": _resolve_kokoro,
+    "kitten": _resolve_kitten,
+}
+
+AUTO_ENGINES = frozenset(_RESOLVERS)
+
+
+def resolve_auto_lang(engine, engine_name: str, text: str,
+                      synth_kwargs: dict) -> dict:
     """Resolve a ``lang="auto"`` request against one utterance's text.
 
     Called at the utterance boundary (once per utterance, never per
@@ -160,9 +224,13 @@ def resolve_auto_lang(engine, text: str, synth_kwargs: dict) -> dict:
     otherwise returns a NEW dict — the caller's dict is shared across every
     line of a ``--batch`` run and must not be mutated.
 
+    ``engine_name`` picks the resolver: kokoro speaks misaki letters,
+    kitten espeak voice names.
+
     On an uncertain detection the "lang" key is dropped entirely, so the
-    engine's normal precedence (config lang → voice natural language → "a")
-    applies. The literal string "auto" never continues downstream.
+    engine's normal precedence applies (kokoro: config lang → voice natural
+    language → "a"; kitten: en-us, i.e. exactly today's English path). The
+    literal string "auto" never continues downstream.
     """
     requested = synth_kwargs.get("lang") or getattr(engine, "lang", None)
     if requested != "auto":
@@ -171,13 +239,13 @@ def resolve_auto_lang(engine, text: str, synth_kwargs: dict) -> dict:
     resolved = dict(synth_kwargs)
     resolved.pop("lang", None)
 
+    resolver = _RESOLVERS.get(engine_name)
+    if resolver is None:
+        return resolved
+
     detected = detect(text)
     if detected is None:
         return resolved
 
-    from .engines import kokoro as kokoro_engine
-    voice = synth_kwargs.get("voice") or getattr(engine, "voice", None)
-    natural = (kokoro_engine.natural_lang(kokoro_engine.resolve_voice(voice))
-               if voice else None)
-    resolved["lang"] = to_kokoro_lang(detected, natural)
+    resolved["lang"] = resolver(engine, detected, synth_kwargs)
     return resolved

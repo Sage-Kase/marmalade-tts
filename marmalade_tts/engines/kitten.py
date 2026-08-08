@@ -18,9 +18,37 @@ MODEL_REPOS = {
 VOICES = ["Bella", "Jasper", "Luna", "Bruno", "Rosie", "Hugo", "Kiki", "Leo"]
 
 
+def espeak_voice(lang) -> str | None:
+    """A ``--lang`` value → the espeak voice the daemon phonemizes with.
+
+    The detector's ISO-639-1 codes are translated (``fr`` → ``fr-fr``,
+    ``pt`` → ``pt-br``) so the code a user reads in `--lang auto` output
+    is also the code they can pin. Anything else goes through verbatim:
+    espeak's own voice names are the engine's native vocabulary, so
+    ``--lang cmn`` or ``--lang en-gb`` reach it unaltered and espeak
+    rejects what it doesn't know.
+
+    ``"auto"`` returns None rather than reaching espeak: a surviving
+    sentinel means a resolution step was skipped upstream, and English is
+    the right degrade (same rule as Android's
+    ``KittenDirectEngine.espeakVoiceFor``).
+    """
+    from .. import langdetect
+    if not lang or lang == "auto":
+        return None
+    return (langdetect.to_espeak_lang(lang)
+            if lang in langdetect.DETECTED_LANGS else lang)
+
+
 class KittenEngine(Engine):
     name = "kitten"
     MAX_CHARS = 500  # conservative — kitten's small CPU model degrades on long inputs
+
+    # Kitten's model is trained on en-us IPA, but it phonemizes through
+    # espeak like Kokoro does, so pointing espeak at another language is a
+    # real (if accented) capability rather than a no-op — Max's 2026-08-08
+    # call. The voice never changes: `--lang` moves the phonemizer only.
+    SUPPORTS_LANG = True
 
     # The F chunking rules (Max's 2026-08-07 clause-split ear-lab pick):
     # plan in TEXT space via chunking.clause_chunks — the exact port of
@@ -35,6 +63,10 @@ class KittenEngine(Engine):
         self.cfg = cfg
         self.voice = cfg.get("voice", "Kiki")
         self.model_size = cfg.get("model_size", "nano")
+        # Not defaulted: None means "the daemon's own en-us", which is the
+        # English path exactly as it was before `--lang` reached kitten.
+        # "auto" here is resolved per utterance, same as on kokoro.
+        self.lang = cfg.get("lang")
         self.use_daemon = cfg.get("daemon", True)
         # The kitten daemon runs concurrent requests (serve max_concurrency=4
         # with a phonemizer lock); the subprocess fallback must stay serial.
@@ -55,7 +87,7 @@ class KittenEngine(Engine):
 
     def synthesize(self, text: str, out_path: str, voice: str = None,
                    speed: float = 1.0, context: str = None,
-                   lookahead: str = None, **kwargs):
+                   lookahead: str = None, lang: str = None, **kwargs):
         v = voice or self.voice
 
         if self.use_daemon:
@@ -67,6 +99,9 @@ class KittenEngine(Engine):
                 request["context"] = context
             if lookahead:
                 request["lookahead"] = lookahead
+            espeak = espeak_voice(lang or self.lang)
+            if espeak:
+                request["lang"] = espeak
             dmgr.synthesize("kitten", request, auto_start=True)
             return
 
@@ -81,16 +116,26 @@ class KittenEngine(Engine):
                     env_extra={"CUDA_VISIBLE_DEVICES": "", "HF_HUB_OFFLINE": "1"},
                     engine_name="kitten")
 
-    def phonemize(self, text: str, voice: str = None, **kwargs) -> str:
+    def phonemize(self, text: str, voice: str = None, lang: str = None,
+                  **kwargs) -> str:
         """espeak the whole utterance once, via the daemon (~2ms/paragraph).
-        Phase 1 of the phoneme-direct streaming path."""
+        Phase 1 of the phoneme-direct streaming path.
+
+        ``voice`` is the KITTEN speaker (Bella, Kiki, …) — it rides along
+        so the daemon can validate it, and has nothing to do with espeak.
+        ``lang`` is the espeak language; omitting it phonemizes English.
+        """
         import tempfile
         fd, tmp = tempfile.mkstemp(prefix="marmalade-ph-", suffix=".txt")
         os.close(fd)
+        request = {"op": "phonemize", "text": text,
+                   "voice": voice or self.voice,
+                   "model": self._repo(), "out": tmp}
+        espeak = espeak_voice(lang or self.lang)
+        if espeak:
+            request["lang"] = espeak
         try:
-            dmgr.synthesize("kitten", {
-                "op": "phonemize", "text": text, "voice": voice or self.voice,
-                "model": self._repo(), "out": tmp}, auto_start=True)
+            dmgr.synthesize("kitten", request, auto_start=True)
             with open(tmp, encoding="utf-8") as f:
                 return f.read().strip()
         finally:
@@ -102,13 +147,18 @@ class KittenEngine(Engine):
     def synthesize_phonemes(self, ph_text: str, out_path: str, voice: str = None,
                             speed: float = 1.0, context: str = None,
                             lookahead: str = None, style_ref: int = None,
-                            pad_marks: dict = None, **kwargs):
+                            pad_marks: dict = None, lang: str = None,
+                            **kwargs):
         """Synthesize from phonemes with exact-index conditioning cuts.
 
         ``style_ref`` pins the style-pack row (the wrapper indexes it by
         input length, and neighbouring rows are audibly different — Max's
         P11 verdict), ``pad_marks`` tops up a mark's rendered pause with
-        inserted silence."""
+        inserted silence.
+
+        ``lang`` is accepted and dropped: the phonemes arriving here were
+        already produced in that language by :meth:`phonemize`, and this
+        path never touches espeak."""
         request = {"ph_text": ph_text, "voice": voice or self.voice,
                    "speed": speed, "model": self._repo(), "out": out_path}
         if context:
@@ -122,7 +172,8 @@ class KittenEngine(Engine):
         dmgr.synthesize("kitten", request, auto_start=True)
 
     def list_voices(self):
-        print("Language: English only (en)")
+        print("Language: trained on English; --lang / --lang auto point "
+              "espeak at another language and the voice reads it accented")
         print(f"Kitten TTS voices: {', '.join(VOICES)}")
         # Upstream ships micro/mini only as dynamic-int8 ONNX (no fp32
         # published); fp32 nano beats them on quality AND speed.

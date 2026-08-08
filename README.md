@@ -249,7 +249,17 @@ marmalade-tts kitten Kiki "Hello from Kiki"       # specify voice inline
 marmalade-tts kitten --list                        # show all voices
 marmalade-tts kitten --fast "Quick response"       # nano model
 marmalade-tts kitten --quality "Important message" # mini model
+marmalade-tts kitten "Hola, ¿cómo estás?" --lang auto   # accented Spanish
 ```
+
+Kitten's model is trained on English, but it phonemizes through espeak, so
+`--lang` genuinely changes the pronunciation — accented rather than
+native. `--lang auto` detects the language per utterance and moves only
+the phonemizer; the voice you picked keeps speaking, and English (or a
+detection too uncertain to call) is exactly the plain English path. Codes
+are espeak voice names: `en-us`, `es`, `fr-fr`, `it`, `pt-br`, `ja`, `hi`.
+When the language actually matters, use kokoro — a model trained on the
+language beats an accent.
 
 ### piper
 
@@ -1042,11 +1052,11 @@ Ideas under consideration. No promises on timing — feedback and PRs welcome.
 ### Per-language routing
 
 Detection itself has shipped: `--lang auto` detects the input text's
-language and phonemizes accordingly on kokoro (see the kokoro section
-above). What remains is *routing* — using the detected language to pick an
-engine / voice / model too, e.g. Japanese text switching to a kokoro
-Japanese voice rather than the configured one speaking Japanese, with
-per-language defaults configurable in `config.yaml`.
+language and phonemizes accordingly on kokoro and kitten (see those
+sections above). What remains is *routing* — using the detected language
+to pick an engine / voice / model too, e.g. Japanese text switching to a
+kokoro Japanese voice rather than the configured one speaking Japanese,
+with per-language defaults configurable in `config.yaml`.
 
 ### Emoji-driven emotional prosody
 

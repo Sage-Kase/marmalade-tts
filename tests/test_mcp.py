@@ -118,7 +118,7 @@ class TestLangPlumbing:
         from marmalade_tts.mcp_server import ENGINE_CLASSES
         supports = {name for name, cls in ENGINE_CLASSES.items()
                     if getattr(cls, "SUPPORTS_LANG", False)}
-        assert supports == {"kokoro", "coqui"}
+        assert supports == {"kokoro", "kitten", "coqui"}
 
 
 # ── list_voices_data ────────────────────────────────────────────────────────

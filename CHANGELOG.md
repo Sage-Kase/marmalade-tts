@@ -6,6 +6,16 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`--lang` and `--lang auto` for kitten.** Kitten phonemizes through
+  espeak like kokoro does, so pointing espeak at another language really
+  changes the pronunciation — accented, since the model only ever learned
+  English IPA, which Max judged better than reading Spanish through
+  English letter rules. `--lang` takes espeak voice names (`en-us`, `es`,
+  `fr-fr`, `it`, `pt-br`, `ja`, `hi`, or any other espeak voice); the
+  detector's ISO codes are translated for convenience. `--lang auto`
+  moves the phonemizer only — the Kitten voice you picked still speaks,
+  and English or an uncertain detection is byte-identical to the plain
+  English path.
 - **`--lang auto` for kokoro.** Detects the input text's language and
   phonemizes accordingly, once per utterance (each line of a `--batch`
   run is detected separately). Detection changes only the pronunciation

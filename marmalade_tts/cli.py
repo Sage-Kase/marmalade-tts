@@ -607,8 +607,13 @@ Examples:
                         help="Language code. Kokoro uses single-letter codes "
                              "(a=American, b=British, j=Japanese, z=Mandarin) "
                              "and defaults to the voice's natural language. "
-                             "Coqui multilingual models use IETF codes "
-                             "(en, es, fr, …).")
+                             "Kitten uses espeak voice names (en-us, es, "
+                             "fr-fr, it, pt-br, ja, hi) and reads a "
+                             "non-English one accented — its model is "
+                             "trained on English. Coqui multilingual models "
+                             "use IETF codes (en, es, fr, …). `auto` "
+                             "(kokoro, kitten) detects the language per "
+                             "utterance; the voice never changes.")
     parser.add_argument("--speaker", default=None,
                         help="Speaker id or name. Piper multi-speaker models "
                              "take an integer; Coqui multi-speaker models "
@@ -886,9 +891,11 @@ def _run():
         synth_kwargs["voice"] = voice
     lang = args.lang or (alias_overrides.get("lang") if alias_overrides else None)
     if lang:
-        if lang == "auto" and engine_name != "kokoro":
+        from . import langdetect
+        if lang == "auto" and engine_name not in langdetect.AUTO_ENGINES:
+            supported = ", ".join(sorted(langdetect.AUTO_ENGINES))
             parser.error(
-                f"--lang auto is only supported by the kokoro engine "
+                f"--lang auto is only supported by the {supported} engines "
                 f"(engine is {engine_name}). Pass a concrete language "
                 f"code instead.")
         if getattr(engine, "SUPPORTS_LANG", False):

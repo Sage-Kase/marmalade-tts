@@ -331,21 +331,26 @@ def run() -> None:
                  Uses the configured engine/defaults speed when omitted.
           out_path: Where to write the WAV. A temp file is used when omitted.
           lang: Pronunciation language. Usually unnecessary — omit it. Only
-                kokoro and coqui take one; every other engine's language is
-                fixed by the voice/model, and a lang passed to them is
-                ignored (the result says so in a `note` field).
+                kokoro, kitten and coqui take one; every other engine's
+                language is fixed by the voice/model, and a lang passed to
+                them is ignored (the result says so in a `note` field).
                 Vocabulary differs per engine:
                   - kokoro: single misaki letters — `a` American English,
                     `b` British English, `j` Japanese, `z` Mandarin. Kokoro
                     voices already default to their own natural language
                     (george → `b`, alpha/kumo → `j`, xiaobei → `z`), so pass
                     lang only to force a voice to speak another language.
-                    `auto` (kokoro only) detects the language from the text,
-                    once per utterance, and phonemizes accordingly — the
-                    voice is unchanged, and an uncertain detection falls
-                    back to the voice's natural language.
+                  - kitten: espeak voice names — `en-us`, `es`, `fr-fr`,
+                    `it`, `pt-br`, `ja`, `hi`. The model is trained on
+                    English, so a non-English one is read accented; prefer
+                    a kokoro voice when the language matters.
                   - coqui: IETF codes — `en`, `es`, `fr`, … for multilingual
                     models.
+                `auto` (kokoro and kitten) detects the language from the
+                text, once per utterance, and phonemizes accordingly — the
+                voice is never changed, and an uncertain detection falls
+                back to the engine's own default (kokoro: the voice's
+                natural language; kitten: English).
 
         Returns: `{"out": path, "engine": name, "voice": resolved-voice}`
         (plus `note` when an argument was ignored), or `{"error": "..."}` if

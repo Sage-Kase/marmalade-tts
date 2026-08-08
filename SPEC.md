@@ -93,9 +93,13 @@ Options:
 - `--voice NAME` — explicit voice override (alternative to positional)
 - `--lang CODE` — language code. Kokoro: single-letter misaki codes
   (`a`/`b`/`j`/`z` have shipped voices; unset = the voice's natural
-  language), or `auto` to detect the language from the text (kokoro only,
-  once per utterance). Coqui multilingual models: IETF codes (`en`, `es`,
-  …). Other engines ignore it and the CLI says so on stderr.
+  language). Kitten: espeak voice names (`en-us`, `es`, `fr-fr`, `it`,
+  `pt-br`, `ja`, `hi`) — its model is trained on English, so anything
+  else is read accented. Coqui multilingual models: IETF codes (`en`,
+  `es`, …). `auto` detects the language from the text, once per
+  utterance, on kokoro and kitten; every other engine rejects it. Engines
+  with no language setting ignore `--lang` and the CLI says so on
+  stderr.
 - `--speaker ID` — speaker id (piper multi-speaker models; matcha_vctk 0-107)
 - `--fast` — use fast preset (smallest/fastest models)
 - `--balanced` — use balanced preset

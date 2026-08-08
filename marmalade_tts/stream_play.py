@@ -243,7 +243,8 @@ def try_stream_single(
 
     # `--lang auto` resolves once per utterance, before planning/chunking.
     from . import langdetect
-    synth_kwargs = langdetect.resolve_auto_lang(engine, processed, synth_kwargs)
+    synth_kwargs = langdetect.resolve_auto_lang(engine, engine_name, processed,
+                                                synth_kwargs)
 
     max_chars = chunking.resolve_max_chars(engine, eng_cfg)
     if max_chars is None:

@@ -305,7 +305,8 @@ def synthesize_one(
     # `--lang auto` resolves here, once per utterance, on the preprocessed
     # text — never per chunk, and never against the raw batch input.
     from . import langdetect
-    synth_kwargs = langdetect.resolve_auto_lang(engine, processed, synth_kwargs)
+    synth_kwargs = langdetect.resolve_auto_lang(engine, engine_name, processed,
+                                                synth_kwargs)
 
     # ── Synthesis + effects ──
     from . import chunking

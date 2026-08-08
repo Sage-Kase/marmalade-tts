@@ -9,6 +9,8 @@ fix_en_phonemes in kitten-daemon.py.
 
 import importlib.util
 import os
+import sys
+import types
 
 import pytest
 
@@ -356,3 +358,217 @@ def test_tail_cap_never_cuts_into_speech():
 def test_tail_cap_respects_the_context_cut():
     wav = _quiet(10 * FRAME)
     assert cap(wav, 5 * FRAME, len(wav)) == 5 * FRAME + 3 * FRAME
+
+
+# ── Per-language phonemization ────────────────────────────────────────────
+#
+# `--lang auto` on kitten moves the phonemizer, never the voice (Max,
+# 2026-08-08). The daemon takes the espeak voice as a request field and
+# publishes it on a thread-local, because kittentts calls the phonemizer
+# from inside generate() where we can't pass an argument.
+
+class _FakeBackend:
+    """Stands in for phonemizer's EspeakBackend."""
+
+    def __init__(self, marker=None):
+        self.marker = marker
+        self.calls = []
+
+    def phonemize(self, texts, **kwargs):
+        self.calls.append(list(texts))
+        # The English stand-in echoes its input, so the "yeah" fixup is
+        # visible in the result; the others tag theirs so the test can
+        # tell which backend answered.
+        return [t if self.marker is None else f"{self.marker}:{t}"
+                for t in texts]
+
+
+class _FakeOnnxModel:
+    def __init__(self, backend):
+        self.phonemizer = backend
+
+
+@pytest.fixture
+def patched(monkeypatch):
+    """A patched English backend plus a registry of per-language ones."""
+    english = _FakeBackend()
+    others = {}
+
+    def fake_backend_for(lang):
+        return others.setdefault(lang, _FakeBackend(lang))
+
+    monkeypatch.setattr(kitten_daemon, "_backend_for", fake_backend_for)
+    monkeypatch.setattr(kitten_daemon._current, "lang", None, raising=False)
+    om = _FakeOnnxModel(english)
+    kitten_daemon._patch_phonemizer(om)
+    return om, english, others
+
+
+def test_no_language_is_the_english_path(patched):
+    om, english, others = patched
+    assert om.phonemizer.phonemize(["yˈɛh"]) == ["yˈɛh"]
+    assert english.calls == [["yˈɛh"]]
+    assert others == {}
+
+
+def test_explicit_en_us_is_the_same_english_path(patched):
+    """`--lang auto` on English text resolves to "en-us", and that must be
+    byte-identical to passing nothing: same backend, same fixup."""
+    om, english, others = patched
+    kitten_daemon._current.lang = "en-us"
+    assert om.phonemizer.phonemize(["jˈɛh"]) == ["jˈæ"]   # the "yeah" fixup
+    assert english.calls == [["jˈɛh"]]
+    assert others == {}
+
+
+def test_another_language_uses_its_own_backend(patched):
+    om, english, others = patched
+    kitten_daemon._current.lang = "es"
+    assert om.phonemizer.phonemize(["hola"]) == ["es:hola"]
+    assert english.calls == []
+    assert set(others) == {"es"}
+
+
+def test_english_fixup_does_not_apply_to_other_languages(patched):
+    """The "yeah" rewrite corrects an English letter-to-sound mistake; the
+    same phoneme run is a legitimate word elsewhere."""
+    om, _, others = patched
+    kitten_daemon._current.lang = "fr-fr"
+    others["fr-fr"] = _FakeBackend("fr-fr")
+    others["fr-fr"].phonemize = lambda texts, **kw: ["jˈɛh"]
+    assert om.phonemizer.phonemize(["yeah"]) == ["jˈɛh"]
+
+
+def test_non_latin_language_routes_rather_than_raising(patched):
+    """ja/zh/hi produce IPA outside Kitten's token vocabulary. Upstream's
+    TextCleaner drops unknown characters (`except KeyError: pass`), so the
+    audio degrades — nothing on this path may raise."""
+    om, _, others = patched
+    for lang in ("ja", "hi"):
+        kitten_daemon._current.lang = lang
+        assert om.phonemizer.phonemize(["テスト"]) == [f"{lang}:テスト"]
+
+
+def test_synth_publishes_and_clears_the_thread_local(monkeypatch):
+    seen = []
+    monkeypatch.setattr(kitten_daemon, "check_loaded", lambda *a: None)
+    monkeypatch.setattr(kitten_daemon, "_synth",
+                        lambda model, req: seen.append(kitten_daemon._current.lang))
+
+    kitten_daemon.synth(None, {"text": "x", "out": "/dev/null", "lang": "es"})
+    assert seen == ["es"]
+    assert kitten_daemon._current.lang is None
+
+    kitten_daemon.synth(None, {"text": "x", "out": "/dev/null"})
+    assert seen[-1] == kitten_daemon.DEFAULT_ESPEAK_VOICE
+
+
+def test_synth_clears_the_thread_local_after_a_failure(monkeypatch):
+    monkeypatch.setattr(kitten_daemon, "check_loaded", lambda *a: None)
+
+    def boom(model, req):
+        raise RuntimeError("render failed")
+
+    monkeypatch.setattr(kitten_daemon, "_synth", boom)
+    with pytest.raises(RuntimeError):
+        kitten_daemon.synth(None, {"lang": "es"})
+    assert kitten_daemon._current.lang is None
+
+
+# ── Client → daemon request shape ─────────────────────────────────────────
+
+def _capture_requests(monkeypatch):
+    from marmalade_tts import daemon as dmgr
+    sent = []
+    monkeypatch.setattr(dmgr, "synthesize",
+                        lambda engine, req, **kw: sent.append(req))
+    return sent
+
+
+def test_phonemize_sends_the_espeak_language(monkeypatch, tmp_path):
+    from marmalade_tts.engines.kitten import KittenEngine
+    sent = _capture_requests(monkeypatch)
+    KittenEngine({"voice": "Bella"}).phonemize("hola", lang="es")
+    assert sent[0]["op"] == "phonemize"
+    assert sent[0]["lang"] == "es"
+    assert sent[0]["voice"] == "Bella"     # the KITTEN speaker, not espeak
+
+
+def test_phonemize_without_a_language_omits_the_field(monkeypatch):
+    from marmalade_tts.engines.kitten import KittenEngine
+    sent = _capture_requests(monkeypatch)
+    KittenEngine({"voice": "Bella"}).phonemize("hello")
+    assert "lang" not in sent[0]
+
+
+def test_phonemize_translates_iso_codes_to_espeak_names(monkeypatch):
+    from marmalade_tts.engines.kitten import KittenEngine
+    sent = _capture_requests(monkeypatch)
+    KittenEngine({"voice": "Bella"}).phonemize("bonjour", lang="fr")
+    assert sent[0]["lang"] == "fr-fr"
+
+
+def test_text_path_sends_the_espeak_language(monkeypatch):
+    from marmalade_tts.engines.kitten import KittenEngine
+    sent = _capture_requests(monkeypatch)
+    KittenEngine({"voice": "Bella"}).synthesize(
+        "hola", "/tmp/x.wav", lang="es")
+    assert sent[0]["lang"] == "es"
+
+
+def test_configured_lang_is_used_when_the_call_names_none(monkeypatch):
+    """`engines.kitten.lang: es` in config.yaml, no --lang."""
+    from marmalade_tts.engines.kitten import KittenEngine
+    sent = _capture_requests(monkeypatch)
+    KittenEngine({"voice": "Bella", "lang": "es"}).phonemize("hola")
+    assert sent[0]["lang"] == "es"
+
+
+def test_a_surviving_auto_sentinel_degrades_to_english(monkeypatch):
+    """`engines.kitten.lang: auto` that reached the engine unresolved must
+    not be handed to espeak as a voice name."""
+    from marmalade_tts.engines.kitten import KittenEngine
+    sent = _capture_requests(monkeypatch)
+    KittenEngine({"voice": "Bella", "lang": "auto"}).phonemize("hello")
+    assert "lang" not in sent[0]
+
+
+def test_other_language_backends_strip_language_switch_flags(monkeypatch):
+    """espeak tags a word it read in another language: "(en) … (fr)". The
+    brackets aren't in Kitten's vocabulary, so they drop out and the model
+    reads the tag as letters — measured against the live daemon, 2026-08-08.
+    Keep the foreign phonemes, drop the flags."""
+    built = {}
+
+    class _FakeEspeakBackend:
+        def __init__(self, language, **kwargs):
+            built[language] = kwargs
+
+    fake = types.SimpleNamespace(
+        backend=types.SimpleNamespace(EspeakBackend=_FakeEspeakBackend))
+    monkeypatch.setitem(sys.modules, "phonemizer", fake)
+    monkeypatch.setattr(kitten_daemon, "_backends", {})
+
+    kitten_daemon._backend_for("fr-fr")
+    assert built["fr-fr"]["language_switch"] == "remove-flags"
+    assert built["fr-fr"]["preserve_punctuation"] is True
+    assert built["fr-fr"]["with_stress"] is True
+
+
+def test_backends_are_built_once_and_reused(monkeypatch):
+    """A language load costs ~50 ms of espeak; an alias that reads one
+    language must not pay it per chunk."""
+    calls = []
+
+    class _FakeEspeakBackend:
+        def __init__(self, language, **kwargs):
+            calls.append(language)
+
+    fake = types.SimpleNamespace(
+        backend=types.SimpleNamespace(EspeakBackend=_FakeEspeakBackend))
+    monkeypatch.setitem(sys.modules, "phonemizer", fake)
+    monkeypatch.setattr(kitten_daemon, "_backends", {})
+
+    first = kitten_daemon._backend_for("es")
+    assert kitten_daemon._backend_for("es") is first
+    assert calls == ["es"]

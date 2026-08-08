@@ -28,33 +28,57 @@ no native knob and falls back to sox post-processing. See
 [ENGINE-GUIDE.md § Honoring --speed](../ENGINE-GUIDE.md#honoring---speed-required)
 for the rule and how new engines must implement it.
 
-**`--lang` contract:** only kokoro (misaki letter codes) and coqui (IETF
-codes, multilingual models) take a language setting — engine classes
-declare this via `SUPPORTS_LANG`. For every other engine the language is
-a property of the voice/model (piper encodes it in the voice file;
-kitten/pocket/matcha/emojivoice are English-only), so `--lang` there
-prints a stderr warning and is dropped rather than silently ignored.
+**`--lang` contract:** kokoro (misaki letter codes), kitten (espeak voice
+names) and coqui (IETF codes, multilingual models) take a language
+setting — engine classes declare this via `SUPPORTS_LANG`. For every
+other engine the language is a property of the voice/model (piper encodes
+it in the voice file; pocket/matcha/emojivoice are English-only), so
+`--lang` there prints a stderr warning and is dropped rather than
+silently ignored.
 
-`--lang auto` is kokoro-only (any other engine is an error). It detects
-the language once per utterance, from that utterance's text, and changes
-only the pronunciation language — never the voice. Detected English
-resolves to the voice's own English variant (British for `george`,
-American otherwise), and an uncertain detection falls back to the normal
-precedence: config lang, then the voice's natural language, then `a`.
+`--lang auto` works on kokoro and kitten (any other engine is an error).
+It detects the language once per utterance, from that utterance's text,
+and changes only the pronunciation language — never the voice. An
+uncertain detection falls back to the engine's normal precedence.
+
+- **kokoro** — detected English resolves to the voice's own English
+  variant (British for `george`, American otherwise). Abstaining falls
+  back to config lang, then the voice's natural language, then `a`.
+- **kitten** — the model is trained on English, so a non-English
+  utterance comes out accented. Max's 2026-08-08 call is that this beats
+  reading Spanish through English letter rules; for real non-English
+  quality use kokoro. English and abstention are byte-identical to the
+  plain English path.
 
 ---
 
 ## kitten
 
-Fast, lightweight, English-only. 8 voices, 3 model sizes.
+Fast, lightweight, trained on English. 8 voices, 3 model sizes.
 
 | Knob       | CLI       | Config key                   | Default | Notes                                  |
 |------------|-----------|------------------------------|---------|----------------------------------------|
 | voice      | positional / `--voice` | `engines.kitten.voice`       | `Kiki`  | One of: Bella, Jasper, Luna, Bruno, Rosie, Hugo, Kiki, Leo |
+| lang       | `--lang`  | `engines.kitten.lang`        | `en-us` | espeak voice name — `en-us`, `es`, `fr-fr`, `it`, `pt-br`, `ja`, `hi`; or `auto` to detect per utterance |
 | model_size | —         | `engines.kitten.model_size`  | `nano`  | `nano` (fp32 ~57MB, fastest + best quality), `micro` (int8 ~41MB), `mini` (int8 ~78MB) — upstream ships micro/mini only as dynamic-int8, which sounds worse and runs slower than fp32 nano |
+
+Kitten phonemizes through espeak, so `--lang` really does change the
+pronunciation — but the model only ever learned English IPA, so another
+language comes out **accented**, not native. Max's 2026-08-08 call: that
+beats reading Spanish through English letter rules. When the language
+matters, use kokoro. The voice never changes: `--lang` moves the
+phonemizer alone.
+
+The detector's ISO codes are accepted and translated (`fr` → `fr-fr`,
+`pt` → `pt-br`), and anything else goes to espeak verbatim, so its own
+voice names work too — `--lang cmn` for Mandarin, `--lang en-gb` for
+British letter rules. Non-Latin scripts (`ja`, `hi`, `cmn`) produce IPA
+outside Kitten's token vocabulary; the unknown tokens are dropped rather
+than rejected, so it degrades instead of failing.
 
 ```bash
 marmalade-tts kitten Hugo "Hello"
+marmalade-tts kitten Bella --lang auto "Hola, ¿cómo estás?"
 marmalade-tts config set engines.kitten.model_size mini
 ```
 

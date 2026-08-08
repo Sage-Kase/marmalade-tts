@@ -2,6 +2,10 @@
 """marmalade-tts kitten daemon — keeps the KittenTTS model loaded in RAM.
 
 Request: {"text": "...", "voice": "Hugo", "speed": 1.0, "out": "/tmp/x.wav"}
+
+``lang`` (optional, every op that phonemizes) is the espeak voice name to
+phonemize with — `phonemizer`'s EspeakBackend vocabulary ("en-us", "es",
+"fr-fr", "pt-br"), not raw espeak's file basenames. Absent means English.
 """
 
 import os
@@ -63,10 +67,47 @@ def fix_en_phonemes(phonemes: str) -> str:
     return _YEAH_RE.sub(r"j\1æ", phonemes)
 
 
+# The espeak voice kittentts builds its own backend with, and the one every
+# request gets unless it names another. Mirrors
+# marmalade_tts.langdetect.KITTEN_ESPEAK_DEFAULT (this script runs in the
+# kitten venv and can't import the package).
+DEFAULT_ESPEAK_VOICE = "en-us"
+
 # espeak keeps global state — concurrent phonemize calls are unsafe, so the
 # patched wrapper serializes G2P while leaving ONNX inference free to run in
-# parallel across requests (same split as upstream KittenTTS PR #147).
+# parallel across requests (same split as upstream KittenTTS PR #147). The
+# lock covers every language's backend: they all drive the one espeak.
 _phonemize_lock = threading.Lock()
+
+# Espeak voice name → its backend. Built on first use (~50 ms to load a
+# language) and kept: an alias that reads one language re-uses it forever.
+_backends = {}
+_backends_lock = threading.Lock()
+
+# The language of the request this thread is serving. Each request runs on
+# its own serve() thread, so a thread-local is what lets the wrapper's
+# phonemize — which kittentts calls from inside generate(), out of our
+# reach — pick up a per-request language.
+_current = threading.local()
+
+
+def _backend_for(lang):
+    with _backends_lock:
+        backend = _backends.get(lang)
+        if backend is None:
+            import phonemizer
+            backend = phonemizer.backend.EspeakBackend(
+                language=lang, preserve_punctuation=True, with_stress=True,
+                # espeak marks a word it read in another language with a
+                # "(en) … (fr)" flag. Kitten's token vocabulary has no
+                # parentheses, so the brackets vanish and the model is left
+                # reading the tag out as letters — "en", "fr". Keep the
+                # foreign word's phonemes, drop the flags. (Not applied to
+                # the English backend: that is kittentts' own, and leaving
+                # it untouched is what keeps the English path identical.)
+                language_switch="remove-flags")
+            _backends[lang] = backend
+        return backend
 
 
 def _patch_phonemizer(onnx_model):
@@ -76,9 +117,17 @@ def _patch_phonemizer(onnx_model):
     orig = backend.phonemize
 
     def phonemize(texts, **kwargs):
+        lang = getattr(_current, "lang", None)
+        # English keeps the model's own backend, and the "yeah" fixup with
+        # it: the fixup corrects an English letter-to-sound mistake, and
+        # the same phoneme run means something else in another language.
+        if lang is None or lang == DEFAULT_ESPEAK_VOICE:
+            with _phonemize_lock:
+                out = orig(texts, **kwargs)
+            return [fix_en_phonemes(p) for p in out]
+        other = _backend_for(lang)
         with _phonemize_lock:
-            out = orig(texts, **kwargs)
-        return [fix_en_phonemes(p) for p in out]
+            return other.phonemize(texts, **kwargs)
 
     backend.phonemize = phonemize
 
@@ -592,6 +641,17 @@ def load_model():
 def synth(model, req):
     want = req.get("model")
     check_loaded("kitten", MODEL_REPOS.get(want, want), MODEL_REPO)
+    # Publish the request's espeak language for the patched phonemize
+    # wrapper, which kittentts also calls from inside generate(). Cleared
+    # afterwards so a pooled thread can't leak it into the next request.
+    _current.lang = req.get("lang") or DEFAULT_ESPEAK_VOICE
+    try:
+        _synth(model, req)
+    finally:
+        _current.lang = None
+
+
+def _synth(model, req):
     if req.get("op") == "phonemize":
         # Phase 1 of the phoneme-direct path: espeak the whole utterance
         # once (~2ms/paragraph), with the same fixups the text path gets.

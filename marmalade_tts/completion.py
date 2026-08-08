@@ -20,7 +20,8 @@ UNINSTALL_FLAGS = ["--engines", "--purge", "--dry-run", "-y", "--yes"]
 CONFIG_PATHS = [
     "defaults.engine", "defaults.device", "defaults.speed", "defaults.play",
     "defaults.preprocessing",
-    "engines.kitten.voice", "engines.kitten.model_size", "engines.kitten.device",
+    "engines.kitten.voice", "engines.kitten.lang",
+    "engines.kitten.model_size", "engines.kitten.device",
     "engines.kitten.daemon", "engines.kitten.preprocessing",
     "engines.kokoro.voice", "engines.kokoro.lang", "engines.kokoro.device",
     "engines.kokoro.daemon",
@@ -49,8 +50,13 @@ CONFIG_PATHS = [
 ]
 EFFECT_NAMES = list(EFFECTS.keys()) + list(BUILTIN_PRESETS.keys())
 # --lang values are engine-specific: kokoro uses single-letter misaki codes,
-# coqui XTTS v2 uses IETF tags. Other engines ignore --lang entirely.
+# kitten espeak voice names, coqui XTTS v2 IETF tags. Other engines ignore
+# --lang entirely.
 KOKORO_LANGS = ["a", "b", "j", "z", "auto"]
+# The espeak voices kitten's detector can resolve to, plus auto. espeak
+# knows many more and --lang passes any of them through; these are the ones
+# worth offering, since they are what `auto` itself picks.
+KITTEN_LANGS = ["en-us", "es", "fr-fr", "it", "pt-br", "ja", "hi", "auto"]
 COQUI_LANGS = [
     "en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl", "cs", "ar",
     "zh-cn", "ja", "hu", "ko", "hi",
@@ -84,6 +90,7 @@ def bash_completion() -> str:
     config_paths = " ".join(CONFIG_PATHS)
     effect_names = " ".join(EFFECT_NAMES)
     kokoro_langs = " ".join(KOKORO_LANGS)
+    kitten_langs = " ".join(KITTEN_LANGS)
     coqui_langs = " ".join(COQUI_LANGS)
 
     return f'''# marmalade-tts bash completion
@@ -108,6 +115,7 @@ _marmalade_tts() {{
     local config_paths="{config_paths}"
     local effect_names="{effect_names}"
     local kokoro_langs="{kokoro_langs}"
+    local kitten_langs="{kitten_langs}"
     local coqui_langs="{coqui_langs}"
     local flags="--out --out-dir --srt --vtt --play --no-play --speed --voice --lang --speaker \\
                  --speaker-wav --emotion \\
@@ -193,11 +201,13 @@ _marmalade_tts() {{
     fi
 
     # --lang flag values — engine-specific.
-    # kokoro: single-letter misaki codes. coqui: IETF tags accepted by XTTS v2.
+    # kokoro: single-letter misaki codes. kitten: espeak voice names.
+    # coqui: IETF tags accepted by XTTS v2.
     # Other engines ignore --lang, so offer nothing.
     if [[ "$prev" == "--lang" ]]; then
         case "${{words[1]}}" in
             kokoro)     COMPREPLY=( $(compgen -W "$kokoro_langs" -- "$cur") ) ;;
+            kitten)     COMPREPLY=( $(compgen -W "$kitten_langs" -- "$cur") ) ;;
             coqui)      COMPREPLY=( $(compgen -W "$coqui_langs" -- "$cur") ) ;;
         esac
         return
@@ -246,6 +256,7 @@ def zsh_completion() -> str:
     api_voices = " ".join(API_VOICES)
     effect_names = " ".join(EFFECT_NAMES)
     kokoro_langs = " ".join(KOKORO_LANGS)
+    kitten_langs = " ".join(KITTEN_LANGS)
     coqui_langs = " ".join(COQUI_LANGS)
 
     return f'''#compdef marmalade-tts
@@ -264,6 +275,7 @@ _marmalade-tts() {{
     local -a api_voices=({api_voices})
     local -a effect_names=({effect_names})
     local -a kokoro_langs=({kokoro_langs})
+    local -a kitten_langs=({kitten_langs})
     local -a coqui_langs=({coqui_langs})
 
     # Engine-aware voice completion, shared by the positional voice slot
@@ -281,10 +293,12 @@ _marmalade-tts() {{
     }}
 
     # Engine-aware --lang completion. kokoro uses single-letter misaki codes,
-    # coqui XTTS v2 uses IETF tags; other engines ignore --lang.
+    # kitten espeak voice names, coqui XTTS v2 IETF tags; other engines
+    # ignore --lang.
     _marmalade_langs() {{
         case "${{words[2]}}" in
             kokoro)     _values 'kokoro lang' $kokoro_langs ;;
+            kitten)     _values 'kitten lang' $kitten_langs ;;
             coqui)      _values 'coqui language' $coqui_langs ;;
             *) ;;
         esac
