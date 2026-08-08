@@ -1,0 +1,177 @@
+{
+  "en": [
+    {
+      "id": 2701,
+      "title": "Moby Dick; Or, The Whale",
+      "bytes": 1240885
+    },
+    {
+      "id": 1342,
+      "title": "Pride and Prejudice",
+      "bytes": 743289
+    },
+    {
+      "id": 2641,
+      "title": "A Room with a View",
+      "bytes": 383894
+    },
+    {
+      "id": 1727,
+      "title": "The Odyssey: Rendered into English prose for the use of those who cannot read the original",
+      "bytes": 690701
+    },
+    {
+      "id": 1513,
+      "title": "Romeo and Juliet",
+      "bytes": 147749
+    },
+    {
+      "id": 2554,
+      "title": "Crime and Punishment",
+      "bytes": 1157187
+    }
+  ],
+  "es": [
+    {
+      "id": 61851,
+      "title": "El crimen y el castigo",
+      "bytes": 1074673
+    },
+    {
+      "id": 78052,
+      "title": "Andanzas y visiones españolas",
+      "bytes": 455574
+    },
+    {
+      "id": 78068,
+      "title": "Los miserables - Tomo 2 (de 2)",
+      "bytes": 1628559
+    },
+    {
+      "id": 55514,
+      "title": "Cuentos de amor",
+      "bytes": 382073
+    },
+    {
+      "id": 52597,
+      "title": "Insolación y Morriña (Dos historias amorosas)",
+      "bytes": 495037
+    }
+  ],
+  "fr": [
+    {
+      "id": 62215,
+      "title": "Le Fantôme de l'Opéra",
+      "bytes": 620452
+    },
+    {
+      "id": 13951,
+      "title": "Les trois mousquetaires",
+      "bytes": 1355630
+    },
+    {
+      "id": 14287,
+      "title": "L'île mystérieuse",
+      "bytes": 1236063
+    },
+    {
+      "id": 4791,
+      "title": "Voyage au Centre de la Terre",
+      "bytes": 428011
+    },
+    {
+      "id": 78027,
+      "title": "Les enchantements de la forêt",
+      "bytes": 289498
+    },
+    {
+      "id": 76412,
+      "title": "Le cas étrange du docteur Jekyll; Un logement pour la nuit",
+      "bytes": 206090
+    }
+  ],
+  "it": [
+    {
+      "id": 1012,
+      "title": "La Divina Commedia di Dante",
+      "bytes": 581472
+    },
+    {
+      "id": 61885,
+      "title": "Ricordi d'infanzia e di scuola: seguìti da Bambole e marionette, Gente minima, Piccoli studenti, Adolescenti, Due di spade e due di cuori",
+      "bytes": 609628
+    },
+    {
+      "id": 38720,
+      "title": "L'amore che torna: romanzo",
+      "bytes": 715647
+    },
+    {
+      "id": 38628,
+      "title": "Vecchie storie d'amore",
+      "bytes": 174870
+    },
+    {
+      "id": 25178,
+      "title": "Damiano: Storia di una povera famiglia",
+      "bytes": 791611
+    },
+    {
+      "id": 25179,
+      "title": "La carità del prossimo",
+      "bytes": 574171
+    },
+    {
+      "id": 22501,
+      "title": "Fino a Dogali",
+      "bytes": 564812
+    }
+  ],
+  "pt": [
+    {
+      "id": 23145,
+      "title": "A Illustre Casa de Ramires",
+      "bytes": 658187
+    },
+    {
+      "id": 24919,
+      "title": "Amor Crioulo: vida argentina",
+      "bytes": 518865
+    },
+    {
+      "id": 24824,
+      "title": "Os deputados brasileiros nas Côrtes Geraes de 1821",
+      "bytes": 679281
+    },
+    {
+      "id": 25925,
+      "title": "Poesias",
+      "bytes": 204092
+    },
+    {
+      "id": 27964,
+      "title": "Portugal e Brazil: emigração e colonisação",
+      "bytes": 768679
+    },
+    {
+      "id": 22015,
+      "title": "As Minas de Salomão",
+      "bytes": 350864
+    },
+    {
+      "id": 22622,
+      "title": "Aves Migradoras",
+      "bytes": 333447
+    },
+    {
+      "id": 26338,
+      "title": "Alguns homens do meu tempo: impressões litterarias",
+      "bytes": 307936
+    },
+    {
+      "id": 27637,
+      "title": "A correspondência de Fradique Mendes: memórias e notas",
+      "bytes": 339373
+    }
+  ]
+}
