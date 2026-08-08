@@ -208,23 +208,32 @@ installed", say so and the Speak-screen route gains the reroute too.</div>
 quality, <span class="rough">amber</span> = espeak-accented ("better than nothing").</p>
 <table class="scn">
 <tr><th>#</th><th>Where</th><th>Setup</th><th>Text</th><th>Kokoro?</th><th>You hear</th><th>Pinned by</th></tr>
-<tr><td class="id">A1</td><td>Android · any route</td><td>Kokoro alias, default (Auto)</td><td>«Bonjour tout le monde»</td><td>—</td><td class="ok">French phonemes on the alias voice</td><td data-test="android">LangDetectorTest battery</td></tr>
-<tr><td class="id">A2</td><td>Android · any route</td><td>Kitten alias, English (default)</td><td>«Hola, ¿cómo estás?»</td><td>any</td><td>English letter-rules — detection is opt-in on Kitten</td><td data-test="android">MarmaladeTtsService test</td></tr>
-<tr><td class="id">A3</td><td>Android · system TTS</td><td>Kitten alias, Auto-detect</td><td>«Hola, ¿cómo estás?»</td><td>yes</td><td class="ok">Rerouted to a Kokoro Spanish voice (ef_dora)</td><td data-test="android">MarmaladeTtsService test</td></tr>
-<tr><td class="id">A4</td><td>Android · system TTS</td><td>Kitten alias, Auto-detect</td><td>«Hola, ¿cómo estás?»</td><td>no</td><td class="rough">Kitten voice, espeak «es» phonemes</td><td data-test="android">MarmaladeTtsService test</td></tr>
-<tr><td class="id">A5</td><td>Android · Speak screen</td><td>Kitten alias, Auto-detect</td><td>«Hola, ¿cómo estás?»</td><td>yes</td><td class="rough">Kitten voice, espeak «es» — no reroute (see decision check)</td><td data-test="android">UtteranceLanguageTest</td></tr>
-<tr><td class="id">A6</td><td>Android · any route</td><td>Kitten alias, Auto-detect</td><td>「こんにちは」</td><td>no</td><td class="rough">ja espeak IPA; unknown tokens pad — roughest case</td><td data-test="android">UtteranceLanguageTest</td></tr>
-<tr><td class="id">A7</td><td>Android · any route</td><td>Pocket alias</td><td>anything</td><td>any</td><td>English always (no espeak in Pocket)</td><td data-test="android">UtteranceLanguageTest</td></tr>
-<tr><td class="id">C1</td><td>CLI</td><td><code>kokoro --lang auto</code></td><td>«Hola, ¿cómo estás?»</td><td>—</td><td class="ok">misaki «e» Spanish phonemes</td><td data-test="cli">tests/test_langdetect.py</td></tr>
-<tr><td class="id">C2</td><td>CLI</td><td><code>kitten --lang auto</code></td><td>"Good morning!"</td><td>—</td><td>en-us — byte-identical to the plain English path</td><td data-test="cli">tests/test_langdetect.py</td></tr>
-<tr><td class="id">C3</td><td>CLI</td><td><code>kitten --lang auto</code></td><td>«Hola, ¿cómo estás?»</td><td>—</td><td class="rough">Same Kitten voice, espeak «es» phonemes</td><td data-test="cli">tests/test_langdetect.py</td></tr>
-<tr><td class="id">C4</td><td>CLI</td><td><code>kitten --lang fr</code></td><td>anything</td><td>—</td><td class="rough">espeak «fr-fr» — explicit beats detection</td><td data-test="cli">tests/test_langdetect.py</td></tr>
-<tr><td class="id">C5</td><td>CLI</td><td><code>kitten --lang auto</code></td><td>"Ok"</td><td>—</td><td>en-us — too short, detection abstains</td><td data-test="cli">tests/test_langdetect.py</td></tr>
-<tr><td class="id">C6</td><td>CLI</td><td><code>piper --lang auto</code></td><td>anything</td><td>—</td><td>error — engine has no language support</td><td data-test="cli">tests/test_cli.py</td></tr>
+<tr><td class="id">A1</td><td>Android · any route</td><td>Kokoro alias, default (Auto)</td><td>«Bonjour tout le monde»</td><td>—</td><td class="ok">French phonemes on the alias voice</td><td data-test="android"><code>onSynthesizeText_kokoroAliasWithNoStoredLanguageStillDetects</code></td></tr>
+<tr><td class="id">A2</td><td>Android · any route</td><td>Kitten alias, English (default)</td><td>«Hola, ¿cómo estás?»</td><td>any</td><td>English letter-rules — detection is opt-in on Kitten</td><td data-test="android"><code>nullMeansDetectOnKokoroAndNowhereElse</code></td></tr>
+<tr><td class="id">A3</td><td>Android · system TTS</td><td>Kitten alias, Auto-detect</td><td>«Hola, ¿cómo estás?»</td><td>yes</td><td class="ok">Rerouted to a Kokoro Spanish voice (ef_dora)</td><td data-test="android"><code>onSynthesizeText_autoAliasWithKokoroInstalledReroutesSpanish</code></td></tr>
+<tr><td class="id">A4</td><td>Android · system TTS</td><td>Kitten alias, Auto-detect</td><td>«Hola, ¿cómo estás?»</td><td>no</td><td class="rough">Kitten voice, espeak «es» phonemes</td><td data-test="android"><code>onSynthesizeText_autoAliasWithNoKokoroRendersTheLanguageOnKitten</code></td></tr>
+<tr><td class="id">A5</td><td>Android · Speak screen</td><td>Kitten alias, Auto-detect</td><td>«Hola, ¿cómo estás?»</td><td>yes</td><td class="rough">Kitten voice, espeak «es» — no reroute (see decision check)</td><td data-test="android"><code>kittenAutoSpanishPhonemizesInSpanish</code></td></tr>
+<tr><td class="id">A6</td><td>Android · any route</td><td>Kitten alias, Auto-detect</td><td>「こんにちは」</td><td>no</td><td class="rough">ja espeak IPA; unknown tokens pad — roughest case</td><td data-test="android"><code>kittenAutoJapaneseUsesJaEspeak</code></td></tr>
+<tr><td class="id">A7</td><td>Android · any route</td><td>Pocket alias</td><td>anything</td><td>any</td><td>English always (no espeak in Pocket)</td><td data-test="android"><code>pocketHasNoEspeakToPointAnywhere</code></td></tr>
+<tr><td class="id">C1</td><td>CLI</td><td><code>kokoro --lang auto</code></td><td>«Hola, ¿cómo estás?»</td><td>—</td><td class="ok">misaki «e» Spanish phonemes</td><td data-test="cli"><code>test_resolve_auto_lang_detects_and_does_not_mutate</code></td></tr>
+<tr><td class="id">C2</td><td>CLI</td><td><code>kitten --lang auto</code></td><td>"Good morning!"</td><td>—</td><td>en-us — byte-identical to the plain English path</td><td data-test="cli"><code>test_kitten_auto_english_takes_the_english_path</code></td></tr>
+<tr><td class="id">C3</td><td>CLI</td><td><code>kitten --lang auto</code></td><td>«Hola, ¿cómo estás?»</td><td>—</td><td class="rough">Same Kitten voice, espeak «es» phonemes</td><td data-test="cli"><code>test_kitten_auto_spanish_keeps_the_voice_and_moves_espeak</code></td></tr>
+<tr><td class="id">C4</td><td>CLI</td><td><code>kitten --lang fr</code></td><td>anything</td><td>—</td><td class="rough">espeak «fr-fr» — explicit beats detection</td><td data-test="cli"><code>test_kitten_explicit_lang_is_not_touched</code></td></tr>
+<tr><td class="id">C5</td><td>CLI</td><td><code>kitten --lang auto</code></td><td>"Ok"</td><td>—</td><td>en-us — too short, detection abstains</td><td data-test="cli"><code>test_kitten_auto_uncertain_falls_back_to_english</code></td></tr>
+<tr><td class="id">C6</td><td>CLI</td><td><code>piper --lang auto</code></td><td>anything</td><td>—</td><td>error — engine has no language support (a concrete <code>--lang</code> code warns &amp; drops instead)</td><td data-test="cli"><code>test_auto_rejected_for_engine_without_a_resolver</code></td></tr>
 </table>
+
+<div class="note">Fine print: CLI explicit codes pass through untranslated when they aren't
+detector codes, so <code>kitten --lang cmn</code> is the Mandarin escape hatch around the zh→en-us
+rule; the CLI's non-daemon subprocess fallback (<code>daemon:&nbsp;false</code>) stays
+English-only (upstream <code>generate_to_file</code> has no language hook — the daemon is the
+shipping path); espeak's foreign-word switch flags are stripped on non-English backends so Kitten
+never reads "(en)" aloud.</div>
 
 <div class="note">Device-verify still pending for the whole 2026-08-07/08 language batch — the
 walkthrough should include A3, A4 and A5 by ear. Non-Latin quality on Kitten (A6) is expected
-rough and has no quality bar: it exists because silence is worse.</div>
+rough and has no quality bar: it exists because silence is worse. CLI ear-check samples from the
+live daemon: <code>~/coding/scratch/kitten-lang/</code> (es-auto / ja-auto / en-auto vs
+en-plain).</div>
 </body>
 </html>
