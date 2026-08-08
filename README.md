@@ -215,6 +215,7 @@ marmalade-tts kokoro "Hello"
 marmalade-tts kokoro george "Hello"               # British male, positional
 marmalade-tts kokoro nicole "Hello"               # American female
 marmalade-tts kokoro alpha "Hello" --lang a       # Japanese voice, American G2P (accent effect)
+marmalade-tts kokoro "Bonjour" --lang auto        # detect the language from the text
 marmalade-tts kokoro --list                       # show all voices
 ```
 
@@ -230,6 +231,12 @@ Voices are referred to by their **bare name** (e.g. `george`):
 Each voice has a *natural* language but kokoro can speak any voice in any
 supported language — pass `--lang a/b/j/z` (or set `engines.kokoro.lang` in
 config) to override. Useful for accent effects.
+
+`--lang auto` detects the language from the text instead, once per
+utterance (each line of a `--batch` run gets its own detection). It only
+changes pronunciation — the voice stays whatever you chose. Detected
+English uses the voice's own English variant, and text that's too short or
+too ambiguous to call falls back to the normal precedence.
 
 The canonical upstream form (`bm_george`, `af_heart`, etc.) is also
 accepted everywhere for back-compat.
@@ -1032,12 +1039,14 @@ part of the contract and may evolve in any release.
 
 Ideas under consideration. No promises on timing — feedback and PRs welcome.
 
-### Language detection
+### Per-language routing
 
-Auto-detect the input text's language and route to an appropriate
-engine / voice / model — e.g. Japanese text routes to a kokoro Japanese
-voice, Mandarin to a kokoro Mandarin voice, the rest stay on the
-configured default. Per-language defaults configurable in `config.yaml`.
+Detection itself has shipped: `--lang auto` detects the input text's
+language and phonemizes accordingly on kokoro (see the kokoro section
+above). What remains is *routing* — using the detected language to pick an
+engine / voice / model too, e.g. Japanese text switching to a kokoro
+Japanese voice rather than the configured one speaking Japanese, with
+per-language defaults configurable in `config.yaml`.
 
 ### Emoji-driven emotional prosody
 

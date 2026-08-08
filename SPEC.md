@@ -93,8 +93,9 @@ Options:
 - `--voice NAME` — explicit voice override (alternative to positional)
 - `--lang CODE` — language code. Kokoro: single-letter misaki codes
   (`a`/`b`/`j`/`z` have shipped voices; unset = the voice's natural
-  language). Coqui multilingual models: IETF codes (`en`, `es`, …).
-  Other engines ignore it and the CLI says so on stderr.
+  language), or `auto` to detect the language from the text (kokoro only,
+  once per utterance). Coqui multilingual models: IETF codes (`en`, `es`,
+  …). Other engines ignore it and the CLI says so on stderr.
 - `--speaker ID` — speaker id (piper multi-speaker models; matcha_vctk 0-107)
 - `--fast` — use fast preset (smallest/fastest models)
 - `--balanced` — use balanced preset
@@ -206,7 +207,8 @@ engines:
     device: cpu
     voice: heart            # bare name (canonical af_heart also accepted)
     # lang: a              # optional — unset, each voice speaks its natural
-                           # language (a=US-EN, b=UK-EN, j=Japanese, z=Mandarin)
+                           # language (a=US-EN, b=UK-EN, j=Japanese, z=Mandarin);
+                           # auto = detect the language from the text
     daemon: false
     # voices (American EN): heart, bella, nicole, adam, michael
     # voices (British EN):  emma, isabella, george, lewis

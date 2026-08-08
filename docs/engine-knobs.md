@@ -35,6 +35,13 @@ a property of the voice/model (piper encodes it in the voice file;
 kitten/pocket/matcha/emojivoice are English-only), so `--lang` there
 prints a stderr warning and is dropped rather than silently ignored.
 
+`--lang auto` is kokoro-only (any other engine is an error). It detects
+the language once per utterance, from that utterance's text, and changes
+only the pronunciation language — never the voice. Detected English
+resolves to the voice's own English variant (British for `george`,
+American otherwise), and an uncertain detection falls back to the normal
+precedence: config lang, then the voice's natural language, then `a`.
+
 ---
 
 ## kitten
@@ -60,7 +67,7 @@ High quality, multilingual (English, Japanese, Mandarin). 14 voices.
 | Knob   | CLI         | Config key             | Default     | Notes                                          |
 |--------|-------------|------------------------|-------------|------------------------------------------------|
 | voice  | positional / `--voice` | `engines.kokoro.voice` | `af_heart`  | Bare name (`george`) or canonical ID (`bm_george`) |
-| lang   | `--lang`    | `engines.kokoro.lang`  | voice's natural language | `a`/`b`/`j`/`z` (American/British/Japanese/Mandarin) |
+| lang   | `--lang`    | `engines.kokoro.lang`  | voice's natural language | `a`/`b`/`j`/`z` (American/British/Japanese/Mandarin), or `auto` to detect per utterance |
 
 Voice and language are orthogonal — `george` (British male) can speak
 Japanese with `--lang j` for an accent effect. The kokoro daemon serves

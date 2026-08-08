@@ -248,7 +248,7 @@ def test_completion_bash_lang_is_engine_aware(capsys):
     # coqui gets the XTTS v2 IETF tags.
     assert 'local coqui_langs="en es fr de it pt pl tr ru nl cs ar zh-cn ja hu ko hi"' in out
     # kokoro's single-letter codes are gated on the kokoro engine.
-    assert 'local kokoro_langs="a b j z"' in out
+    assert 'local kokoro_langs="a b j z auto"' in out
     assert 'kokoro)     COMPREPLY=( $(compgen -W "$kokoro_langs" -- "$cur") ) ;;' in out
     assert 'coqui)      COMPREPLY=( $(compgen -W "$coqui_langs" -- "$cur") ) ;;' in out
     # The old unconditional letter list must be gone.
@@ -263,7 +263,7 @@ def test_completion_zsh_lang_is_engine_aware(capsys):
     assert "'--lang[Language code]:lang:->langflag'" in out
     assert "_marmalade_langs" in out
     assert "local -a coqui_langs=(en es fr de it pt pl tr ru nl cs ar zh-cn ja hu ko hi)" in out
-    assert "local -a kokoro_langs=(a b j z)" in out
+    assert "local -a kokoro_langs=(a b j z auto)" in out
     assert "(a b j z)'" not in out  # no unconditional inline letter list
 
 

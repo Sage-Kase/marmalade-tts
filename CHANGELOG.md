@@ -5,6 +5,19 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`--lang auto` for kokoro.** Detects the input text's language and
+  phonemizes accordingly, once per utterance (each line of a `--batch`
+  run is detected separately). Detection changes only the pronunciation
+  language, never the voice: a detected English uses the voice's own
+  English variant, and text too short or ambiguous to call falls back to
+  the existing precedence (config lang → voice's natural language → `a`).
+  Covers English, Spanish, French, Italian, Portuguese, Japanese,
+  Mandarin and Hindi. The detector is a script check plus a char-trigram
+  naive-Bayes classifier trained on public-domain Project Gutenberg text
+  (training scripts under `tools/langdetect-train/`) — no new runtime
+  dependency. `auto` is rejected for every other engine.
+
 ## [0.5.0] — 2026-05-19
 
 Major release. Hands-off engine installer, two new expressive engines

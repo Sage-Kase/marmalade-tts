@@ -50,7 +50,7 @@ CONFIG_PATHS = [
 EFFECT_NAMES = list(EFFECTS.keys()) + list(BUILTIN_PRESETS.keys())
 # --lang values are engine-specific: kokoro uses single-letter misaki codes,
 # coqui XTTS v2 uses IETF tags. Other engines ignore --lang entirely.
-KOKORO_LANGS = ["a", "b", "j", "z"]
+KOKORO_LANGS = ["a", "b", "j", "z", "auto"]
 COQUI_LANGS = [
     "en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl", "cs", "ar",
     "zh-cn", "ja", "hu", "ko", "hi",

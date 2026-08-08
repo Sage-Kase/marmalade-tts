@@ -340,6 +340,10 @@ def run() -> None:
                     voices already default to their own natural language
                     (george → `b`, alpha/kumo → `j`, xiaobei → `z`), so pass
                     lang only to force a voice to speak another language.
+                    `auto` (kokoro only) detects the language from the text,
+                    once per utterance, and phonemizes accordingly — the
+                    voice is unchanged, and an uncertain detection falls
+                    back to the voice's natural language.
                   - coqui: IETF codes — `en`, `es`, `fr`, … for multilingual
                     models.
 
