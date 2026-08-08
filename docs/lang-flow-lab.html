@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>marmalade-tts — <span>Language Flow Lab</span></title>
+<link rel="stylesheet" href="/_assets/lab.css">
+<style>
+  .flow{width:100%;max-width:1060px;height:auto;display:block;margin:14px auto}
+  .flow text{font-family:inherit}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:6px 0 2px;font-size:13.5px}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .legend i{display:inline-block;width:22px;height:13px;border-radius:4px}
+  table.scn{width:100%;border-collapse:collapse;margin:12px 0 6px;font-size:14.5px}
+  table.scn th,table.scn td{padding:8px 10px;text-align:left;vertical-align:top;
+    border-bottom:1px solid var(--line)}
+  table.scn th{font-size:13px;letter-spacing:.06em;text-transform:uppercase;opacity:.75}
+  table.scn td.id{font-weight:700;white-space:nowrap}
+  .flag{border:1px solid #a3623a;border-radius:10px;padding:12px 16px;margin:14px 0;
+    background:rgba(163,98,58,.08)}
+  .ok{color:#7fc98f}.rough{color:#d9a441}
+</style>
+</head>
+<body>
+<header>
+  <h1>marmalade-tts — <span>Language Flow Lab</span></h1>
+  <div class="sub">What each platform does when an utterance's language ≠ the voice's language.
+  Decided 2026-08-07/08; every outcome row below is pinned by a unit test.</div>
+</header>
+
+<h2 class="sec">The rules in one breath</h2>
+<p class="lede">Detection runs <b>once per utterance, never per chunk</b>, with the shared
+81&nbsp;KB trigram table (identical bytes on Android and CLI). An <b>explicit language always
+wins</b> over detection. <b>Kokoro</b> auto-detects by default. <b>Kitten</b> is English unless an
+alias opts into Auto-detect — then a Kokoro voice of the detected language wins when one is
+installed and the route may switch voices; otherwise Kitten reads the detected language's espeak
+phonemes itself: accented, "not good but not unusable — better than nothing" (Max). <b>Pocket</b>
+is always English (it doesn't phonemize through espeak at all). The <b>CLI never switches
+engines</b> — you named the engine on the command line.</p>
+
+<h2 class="sec">1 · Detection (shared, both platforms)</h2>
+<div class="legend"><span><i style="background:#3d5a80"></i>step</span>
+<span><i style="background:#5a4a2f"></i>decision</span>
+<span><i style="background:#2f5a3a"></i>outcome</span>
+<span><i style="background:#5a2f2f"></i>abstain</span></div>
+<svg class="flow" viewBox="0 0 1060 340" role="img" aria-label="Detection flowchart">
+<defs><marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+<path d="M0,0 L8,4.5 L0,9 Z" fill="#8a8378"/></marker></defs>
+<g font-size="14" fill="#e8e2d8">
+  <rect x="20" y="20" width="240" height="46" rx="9" fill="#3d5a80"/>
+  <text x="140" y="39" text-anchor="middle">Utterance text</text>
+  <text x="140" y="57" text-anchor="middle" font-size="12" opacity=".8">per utterance — never per chunk</text>
+
+  <rect x="20" y="106" width="240" height="40" rx="9" fill="#5a4a2f"/>
+  <text x="140" y="131" text-anchor="middle">Kana present?</text>
+  <rect x="20" y="186" width="240" height="40" rx="9" fill="#5a4a2f"/>
+  <text x="140" y="211" text-anchor="middle">Han ≥ Latin letters?</text>
+  <rect x="20" y="266" width="240" height="40" rx="9" fill="#5a4a2f"/>
+  <text x="140" y="291" text-anchor="middle">Devanagari ≥ Latin?</text>
+
+  <rect x="330" y="106" width="120" height="40" rx="9" fill="#2f5a3a"/>
+  <text x="390" y="131" text-anchor="middle">ja</text>
+  <rect x="330" y="186" width="120" height="40" rx="9" fill="#2f5a3a"/>
+  <text x="390" y="211" text-anchor="middle">zh</text>
+  <rect x="330" y="266" width="120" height="40" rx="9" fill="#2f5a3a"/>
+  <text x="390" y="291" text-anchor="middle">hi</text>
+
+  <rect x="520" y="106" width="250" height="56" rx="9" fill="#5a4a2f"/>
+  <text x="645" y="129" text-anchor="middle">Any Latin letters?</text>
+  <text x="645" y="149" text-anchor="middle" font-size="12" opacity=".8">no → abstain</text>
+
+  <rect x="520" y="206" width="250" height="56" rx="9" fill="#3d5a80"/>
+  <text x="645" y="229" text-anchor="middle">Char-trigram NB</text>
+  <text x="645" y="249" text-anchor="middle" font-size="12" opacity=".8">en · es · fr · it · pt — margin ≥ 2, else abstain</text>
+
+  <rect x="840" y="100" width="200" height="68" rx="9" fill="#5a2f2f"/>
+  <text x="940" y="122" text-anchor="middle">ABSTAIN → fallback</text>
+  <text x="940" y="141" text-anchor="middle" font-size="11.5" opacity=".8">request locale (system TTS)</text>
+  <text x="940" y="157" text-anchor="middle" font-size="11.5" opacity=".8">else voice / engine default</text>
+
+  <rect x="840" y="206" width="200" height="56" rx="9" fill="#2f5a3a"/>
+  <text x="940" y="229" text-anchor="middle">detected language</text>
+  <text x="940" y="249" text-anchor="middle" font-size="12" opacity=".8">en es fr it pt ja zh hi</text>
+</g>
+<g stroke="#8a8378" stroke-width="1.6" fill="none">
+  <path d="M140,66 V106" marker-end="url(#a)"/>
+  <path d="M140,146 V186" marker-end="url(#a)"/>
+  <path d="M140,226 V266" marker-end="url(#a)"/>
+  <path d="M260,126 H330" marker-end="url(#a)"/>
+  <path d="M260,206 H330" marker-end="url(#a)"/>
+  <path d="M260,286 H330" marker-end="url(#a)"/>
+  <path d="M140,306 V330 H478 C504,330 512,168 518,142" marker-end="url(#a)"/>
+  <path d="M645,162 V206" marker-end="url(#a)"/>
+  <path d="M770,120 H840" marker-end="url(#a)"/>
+  <path d="M770,234 C800,234 810,150 838,138" marker-end="url(#a)"/>
+  <path d="M770,248 H840" marker-end="url(#a)"/>
+</g>
+<g font-size="12" fill="#b8b0a4">
+  <text x="290" y="118">yes</text><text x="290" y="198">yes</text><text x="290" y="278">yes</text>
+  <text x="290" y="324">no (all three)</text>
+  <text x="795" y="112">no</text>
+  <text x="785" y="212">abstain</text>
+  <text x="790" y="266">match</text>
+</g>
+</svg>
+
+<h2 class="sec">2 · Android — what a detected language does</h2>
+<p class="lede">Alias setting first: Kokoro's <i>(empty)</i> means Auto-detect (its default);
+Kitten offers exactly <b>English (US)</b> and <b>Auto-detect</b> (opt-in); Pocket is pinned
+English. An explicit code skips everything below. Then the route decides whether the
+<em>voice</em> may move:</p>
+<svg class="flow" viewBox="0 0 1060 470" role="img" aria-label="Android routing flowchart">
+<defs><marker id="b" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+<path d="M0,0 L8,4.5 L0,9 Z" fill="#8a8378"/></marker></defs>
+<g font-size="14" fill="#e8e2d8">
+  <rect x="330" y="16" width="400" height="46" rx="9" fill="#3d5a80"/>
+  <text x="530" y="35" text-anchor="middle">Auto-detect resolves (chart 1)</text>
+  <text x="530" y="53" text-anchor="middle" font-size="12" opacity=".8">non-English detected on a Kitten/Kokoro alias</text>
+
+  <rect x="330" y="106" width="400" height="40" rx="9" fill="#5a4a2f"/>
+  <text x="530" y="131" text-anchor="middle">Which route asked?</text>
+
+  <rect x="20" y="206" width="330" height="62" rx="9" fill="#3d5a80"/>
+  <text x="185" y="230" text-anchor="middle">System TTS (another app speaks)</text>
+  <text x="185" y="250" text-anchor="middle" font-size="12" opacity=".8">no user-chosen voice for THIS utterance</text>
+
+  <rect x="660" y="206" width="380" height="78" rx="9" fill="#2f5a3a"/>
+  <text x="850" y="230" text-anchor="middle">Speak screen · Share/clipboard</text>
+  <text x="850" y="250" text-anchor="middle" font-size="12" opacity=".8">you picked the alias → the voice NEVER changes;</text>
+  <text x="850" y="267" text-anchor="middle" font-size="12" opacity=".8">espeak phonemizes the detected language on it</text>
+
+  <rect x="20" y="318" width="330" height="56" rx="9" fill="#5a4a2f"/>
+  <text x="185" y="341" text-anchor="middle">Kokoro voice of that language</text>
+  <text x="185" y="361" text-anchor="middle" font-size="12" opacity=".8">installed? (Kokoro-only candidates) &amp; caller named no voice</text>
+
+  <rect x="20" y="414" width="330" height="46" rx="9" fill="#2f5a3a"/>
+  <text x="185" y="433" text-anchor="middle">REROUTE → that Kokoro voice</text>
+  <text x="185" y="451" text-anchor="middle" font-size="12" opacity=".8">a model trained on the language beats an accent</text>
+
+  <rect x="420" y="414" width="330" height="46" rx="9" fill="#2f5a3a"/>
+  <text x="585" y="433" text-anchor="middle">Keep voice, move phonemizer</text>
+  <text x="585" y="451" text-anchor="middle" font-size="12" opacity=".8">Kitten reads the language's espeak IPA — accented</text>
+</g>
+<g stroke="#8a8378" stroke-width="1.6" fill="none">
+  <path d="M530,62 V106" marker-end="url(#b)"/>
+  <path d="M330,126 C240,126 200,160 190,204" marker-end="url(#b)"/>
+  <path d="M730,126 C810,126 840,160 848,204" marker-end="url(#b)"/>
+  <path d="M185,268 V318" marker-end="url(#b)"/>
+  <path d="M185,374 V414" marker-end="url(#b)"/>
+  <path d="M350,352 C480,360 540,380 575,412" marker-end="url(#b)"/>
+</g>
+<g font-size="12" fill="#b8b0a4">
+  <text x="200" y="398">yes</text>
+  <text x="440" y="372">no</text>
+</g>
+</svg>
+<div class="note">espeak codes: en→voice's region (en-us/en-gb) · es→es · fr→fr-fr · it→it ·
+pt→pt-br · ja→ja · hi→hi · <b>zh→en-us</b> (no espeak Mandarin in our stack — real Mandarin needs
+a Chinese Kokoro voice, whose own lexicon path handles it).</div>
+
+<div class="flag"><b>Decision check for Max:</b> on the <b>Speak screen</b>, a Kitten alias on
+Auto-detect keeps the Kitten voice even when Kokoro <em>is</em> installed (you explicitly picked
+that alias; only the system-TTS route reroutes). If you meant "Kokoro wins everywhere it's
+installed", say so and the Speak-screen route gains the reroute too.</div>
+
+<h2 class="sec">3 · CLI — engine is explicit, so the voice never moves</h2>
+<svg class="flow" viewBox="0 0 1060 300" role="img" aria-label="CLI flowchart">
+<defs><marker id="c" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+<path d="M0,0 L8,4.5 L0,9 Z" fill="#8a8378"/></marker></defs>
+<g font-size="14" fill="#e8e2d8">
+  <rect x="20" y="20" width="280" height="46" rx="9" fill="#3d5a80"/>
+  <text x="160" y="39" text-anchor="middle">speak &lt;engine&gt; --lang auto</text>
+  <text x="160" y="57" text-anchor="middle" font-size="12" opacity=".8">explicit --lang &lt;code&gt; skips detection</text>
+
+  <rect x="20" y="116" width="280" height="40" rx="9" fill="#5a4a2f"/>
+  <text x="160" y="141" text-anchor="middle">Which engine?</text>
+
+  <rect x="400" y="14" width="300" height="74" rx="9" fill="#2f5a3a"/>
+  <text x="550" y="38" text-anchor="middle">kokoro → misaki letter code</text>
+  <text x="550" y="57" text-anchor="middle" font-size="11.5" opacity=".8">en → the voice's own a/b variant</text>
+  <text x="550" y="73" text-anchor="middle" font-size="11.5" opacity=".8">abstain → config lang → voice natural → a</text>
+
+  <rect x="400" y="112" width="300" height="74" rx="9" fill="#2f5a3a"/>
+  <text x="550" y="136" text-anchor="middle">kitten → espeak voice code</text>
+  <text x="550" y="155" text-anchor="middle" font-size="11.5" opacity=".8">same Kitten voice reads it</text>
+  <text x="550" y="171" text-anchor="middle" font-size="11.5" opacity=".8">en / abstain → en-us, identical to the English path</text>
+
+  <rect x="400" y="212" width="300" height="46" rx="9" fill="#5a2f2f"/>
+  <text x="550" y="231" text-anchor="middle">any other engine → error</text>
+  <text x="550" y="249" text-anchor="middle" font-size="12" opacity=".8">--lang stays rejected (unchanged)</text>
+
+  <rect x="790" y="112" width="250" height="74" rx="9" fill="#3d5a80"/>
+  <text x="915" y="136" text-anchor="middle">No engine switch — ever</text>
+  <text x="915" y="155" text-anchor="middle" font-size="11.5" opacity=".8">you named the engine; a fallback</text>
+  <text x="915" y="171" text-anchor="middle" font-size="11.5" opacity=".8">that ignores that is a surprise</text>
+</g>
+<g stroke="#8a8378" stroke-width="1.6" fill="none">
+  <path d="M160,66 V116" marker-end="url(#c)"/>
+  <path d="M300,126 C340,110 360,70 398,52" marker-end="url(#c)"/>
+  <path d="M300,140 H400" marker-end="url(#c)"/>
+  <path d="M300,152 C340,170 360,215 398,230" marker-end="url(#c)"/>
+  <path d="M700,149 H790" marker-end="url(#c)"/>
+</g>
+</svg>
+
+<h2 class="sec">Scenario table — every row is a unit test</h2>
+<p class="lede">"Hear" is what actually plays. <span class="ok">green</span> = model-native
+quality, <span class="rough">amber</span> = espeak-accented ("better than nothing").</p>
+<table class="scn">
+<tr><th>#</th><th>Where</th><th>Setup</th><th>Text</th><th>Kokoro?</th><th>You hear</th><th>Pinned by</th></tr>
+<tr><td class="id">A1</td><td>Android · any route</td><td>Kokoro alias, default (Auto)</td><td>«Bonjour tout le monde»</td><td>—</td><td class="ok">French phonemes on the alias voice</td><td data-test="android">LangDetectorTest battery</td></tr>
+<tr><td class="id">A2</td><td>Android · any route</td><td>Kitten alias, English (default)</td><td>«Hola, ¿cómo estás?»</td><td>any</td><td>English letter-rules — detection is opt-in on Kitten</td><td data-test="android">MarmaladeTtsService test</td></tr>
+<tr><td class="id">A3</td><td>Android · system TTS</td><td>Kitten alias, Auto-detect</td><td>«Hola, ¿cómo estás?»</td><td>yes</td><td class="ok">Rerouted to a Kokoro Spanish voice (ef_dora)</td><td data-test="android">MarmaladeTtsService test</td></tr>
+<tr><td class="id">A4</td><td>Android · system TTS</td><td>Kitten alias, Auto-detect</td><td>«Hola, ¿cómo estás?»</td><td>no</td><td class="rough">Kitten voice, espeak «es» phonemes</td><td data-test="android">MarmaladeTtsService test</td></tr>
+<tr><td class="id">A5</td><td>Android · Speak screen</td><td>Kitten alias, Auto-detect</td><td>«Hola, ¿cómo estás?»</td><td>yes</td><td class="rough">Kitten voice, espeak «es» — no reroute (see decision check)</td><td data-test="android">UtteranceLanguageTest</td></tr>
+<tr><td class="id">A6</td><td>Android · any route</td><td>Kitten alias, Auto-detect</td><td>「こんにちは」</td><td>no</td><td class="rough">ja espeak IPA; unknown tokens pad — roughest case</td><td data-test="android">UtteranceLanguageTest</td></tr>
+<tr><td class="id">A7</td><td>Android · any route</td><td>Pocket alias</td><td>anything</td><td>any</td><td>English always (no espeak in Pocket)</td><td data-test="android">UtteranceLanguageTest</td></tr>
+<tr><td class="id">C1</td><td>CLI</td><td><code>kokoro --lang auto</code></td><td>«Hola, ¿cómo estás?»</td><td>—</td><td class="ok">misaki «e» Spanish phonemes</td><td data-test="cli">tests/test_langdetect.py</td></tr>
+<tr><td class="id">C2</td><td>CLI</td><td><code>kitten --lang auto</code></td><td>"Good morning!"</td><td>—</td><td>en-us — byte-identical to the plain English path</td><td data-test="cli">tests/test_langdetect.py</td></tr>
+<tr><td class="id">C3</td><td>CLI</td><td><code>kitten --lang auto</code></td><td>«Hola, ¿cómo estás?»</td><td>—</td><td class="rough">Same Kitten voice, espeak «es» phonemes</td><td data-test="cli">tests/test_langdetect.py</td></tr>
+<tr><td class="id">C4</td><td>CLI</td><td><code>kitten --lang fr</code></td><td>anything</td><td>—</td><td class="rough">espeak «fr-fr» — explicit beats detection</td><td data-test="cli">tests/test_langdetect.py</td></tr>
+<tr><td class="id">C5</td><td>CLI</td><td><code>kitten --lang auto</code></td><td>"Ok"</td><td>—</td><td>en-us — too short, detection abstains</td><td data-test="cli">tests/test_langdetect.py</td></tr>
+<tr><td class="id">C6</td><td>CLI</td><td><code>piper --lang auto</code></td><td>anything</td><td>—</td><td>error — engine has no language support</td><td data-test="cli">tests/test_cli.py</td></tr>
+</table>
+
+<div class="note">Device-verify still pending for the whole 2026-08-07/08 language batch — the
+walkthrough should include A3, A4 and A5 by ear. Non-Latin quality on Kitten (A6) is expected
+rough and has no quality bar: it exists because silence is worse.</div>
+</body>
+</html>
