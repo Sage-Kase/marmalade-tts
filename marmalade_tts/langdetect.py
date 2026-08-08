@@ -27,7 +27,7 @@ _SPACES = re.compile(r"\s+")
 
 # Stage-2 tuning (validated by tools/langdetect-train/validate.py).
 MIN_TRIGRAMS = 6      # below this the guess is noise -> None
-MIN_MARGIN = 4.0      # scaled-cost gap per trigram between best and runner-up
+MIN_MARGIN = 2.0      # scaled-cost gap per trigram between best and runner-up
 
 # Detected language -> kokoro (misaki) single-letter code. "en" is resolved
 # against the voice's own English variant: en-US vs en-GB is never guessed

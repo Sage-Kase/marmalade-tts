@@ -23,8 +23,12 @@ python3 validate.py        # held-out accuracy + script checks
 
 ## Validation results (current table)
 
-* Full sentences (40–200 characters): **99.95%** accuracy on decided cases.
-* At `MIN_MARGIN = 4`: **100%** accuracy with a **2.7%** abstain rate.
+* Full sentences (40–200 characters): **99.95%** accuracy on decided cases
+  with a **0.3%** abstain rate; short fragments (20–40 chars) 99.0%.
+* Table trained at `TOP_K = 4000` (~8.4k trigram vocabulary, 81 KB);
+  `MIN_MARGIN = 2` picked from the sweep (margins 1–8 all measure 100%
+  accuracy on 25–200-char held-out sentences; 2 keeps ordinary es/pt
+  sentences — the closest pair — from abstaining).
 * Script check: ja / zh / hi all pass.
 
 Abstentions are by design — `detect()` returns `None` and the caller falls

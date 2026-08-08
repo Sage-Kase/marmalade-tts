@@ -25,7 +25,7 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 LANGS = ["en", "es", "fr", "it", "pt"]
-TOP_K = 2500      # per-language vocabulary contribution
+TOP_K = 4000      # per-language vocabulary contribution
 ALPHA = 0.5       # Laplace smoothing
 SCALE = 12
 HOLDOUT_FRACTION = 0.15  # tail of each language file held out for validation

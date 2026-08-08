@@ -34,6 +34,75 @@ def test_script_check(text, expected):
     assert langdetect.detect(text) == expected
 
 
+# Accuracy battery: varied register per language — casual speech, UI-string
+# prose, formal prose, questions. Every one must be called, and called right.
+ACCURACY_BATTERY = {
+    "en": [
+        "Could you turn the lights off before you leave the house?",
+        "Battery saver is on, so background activity is limited.",
+        "The committee will publish its final report next Thursday.",
+        "I honestly can't believe how good that movie was.",
+        "Remember to water the plants while we're away this weekend.",
+        "What time does the next train to the city centre leave?",
+    ],
+    "es": [
+        "¿Puedes apagar las luces antes de salir de casa?",
+        "El ahorro de batería está activado y limita la actividad.",
+        "El comité publicará su informe final el próximo jueves.",
+        "La verdad, no puedo creer lo buena que estuvo la película.",
+        "Acuérdate de regar las plantas mientras estamos fuera.",
+        "¿A qué hora sale el próximo tren hacia el centro?",
+    ],
+    "fr": [
+        "Peux-tu éteindre les lumières avant de quitter la maison ?",
+        "L'économiseur de batterie est activé et limite l'activité.",
+        "Le comité publiera son rapport final jeudi prochain.",
+        "Franchement, je n'arrive pas à croire à quel point ce film était bon.",
+        "Pense à arroser les plantes pendant notre absence ce week-end.",
+        "À quelle heure part le prochain train pour le centre-ville ?",
+    ],
+    "it": [
+        "Puoi spegnere le luci prima di uscire di casa?",
+        "Il risparmio energetico è attivo e limita le attività in background.",
+        "Il comitato pubblicherà la relazione finale giovedì prossimo.",
+        "Sinceramente non riesco a credere a quanto fosse bello quel film.",
+        "Ricordati di annaffiare le piante mentre siamo via nel fine settimana.",
+        "A che ora parte il prossimo treno per il centro città?",
+    ],
+    "pt": [
+        "Você pode apagar as luzes antes de sair de casa?",
+        "A economia de bateria está ativada e limita a atividade.",
+        "O comitê publicará seu relatório final na próxima quinta-feira.",
+        "Sinceramente, não acredito em como aquele filme foi bom.",
+        "Lembre-se de regar as plantas enquanto estivermos fora.",
+        "A que horas sai o próximo trem para o centro da cidade?",
+    ],
+    "ja": [
+        "明日の朝、駅で待ち合わせしましょう。",
+        "バッテリーセーバーがオンになっています。",
+        "この本はとても面白かったです。",
+    ],
+    "zh": [
+        "明天早上我们在车站见面吧。",
+        "省电模式已开启,后台活动受到限制。",
+        "这本书非常有意思,我推荐你看。",
+    ],
+    "hi": [
+        "कल सुबह हम स्टेशन पर मिलेंगे।",
+        "बैटरी सेवर चालू है और गतिविधि सीमित है।",
+        "यह किताब बहुत दिलचस्प थी।",
+    ],
+}
+
+
+@pytest.mark.parametrize(
+    "expected,text",
+    [(lang, s) for lang, sents in ACCURACY_BATTERY.items() for s in sents],
+)
+def test_accuracy_battery(expected, text):
+    assert langdetect.detect(text) == expected
+
+
 @pytest.mark.parametrize("text", ["OK", "123", "", "   ", "hi"])
 def test_short_or_ambiguous_abstains(text):
     assert langdetect.detect(text) is None

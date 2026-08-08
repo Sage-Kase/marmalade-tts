@@ -15,7 +15,7 @@ _SPACES = re.compile(r"\s+")
 
 # stage-2 tuning (validated in validate.py)
 MIN_TRIGRAMS = 6      # below this the guess is noise -> None
-MIN_MARGIN = 4.0      # scaled-cost gap per trigram between best and runner-up
+MIN_MARGIN = 2.0      # scaled-cost gap per trigram between best and runner-up
 
 
 def _is_kana(cp: int) -> bool:
