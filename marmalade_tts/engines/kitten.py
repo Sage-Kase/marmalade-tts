@@ -22,15 +22,14 @@ class KittenEngine(Engine):
     name = "kitten"
     MAX_CHARS = 500  # conservative — kitten's small CPU model degrades on long inputs
 
-    # The F chunking rules (Max's 2026-08-07 clause-split ear-lab pick,
-    # mirrored from marmalade-tts-android): quote-aware sentence-run ends
-    # and real boundaries at every clause mark with graded gaps
-    # (chunking.CLAUSE_GAP_MS / CLAUSE_SENT_GAP_MS). Kitten renders
-    # mid-chunk `,;:` with only ~50 ms of pause, so clause marks must be
-    # chunk boundaries to be audible; fragments keep their sentence's
-    # style row (R16-1), so the register never shifts mid-sentence.
-    QUOTE_END_RUNS = True
-    CLAUSE_GAPS = True
+    # The F chunking rules (Max's 2026-08-07 clause-split ear-lab pick):
+    # plan in TEXT space via chunking.clause_chunks — the exact port of
+    # Android's TextChunker.clauseChunks — and render each chunk plain
+    # (per-chunk phonemize, no conditioning, no pad_marks, style row =
+    # pre-split sentence's text length, graded 80/260 ms gaps). Max's
+    # parity rule: CLI and Android must chunk and render identically so
+    # a bug heard on one platform is a bug found on both.
+    TEXT_CLAUSE_PLAN = True
 
     def __init__(self, cfg: dict):
         self.cfg = cfg

@@ -723,61 +723,149 @@ class TestPhStreamPlan:
         assert ph_stream_plan("   ", max_chars=500) == []
 
 
-class TestClauseGaps:
-    """The F rules (Max's 2026-08-07 ear-lab pick): every clause mark is a
-    real boundary; graded gaps; fragments keep their sentence's row."""
+class TestClauseChunks:
+    """The F rules (Max's 2026-08-07 ear-lab pick). Fixtures are IDENTICAL
+    to Android's ClauseChunksTest (marmalade-tts-android) — the two ports
+    must stay behavior-identical so a chunking bug found on one platform
+    is thereby found on both."""
 
-    # "The Lord is my shepherd; I shall not want." (terminal . → ,)
-    PH_PSALM = "ðə lˈɔːɹd ɪz maɪ ʃˈɛpɚd; aɪ ʃˈæl nˌɑːt wˈɑːnt."
+    @staticmethod
+    def _texts(chunks):
+        return [c.text for c in chunks]
 
-    def test_clause_mark_becomes_a_boundary_with_graded_gaps(self):
-        from marmalade_tts.chunking import CLAUSE_GAP_MS
-        plan = ph_stream_plan(self.PH_PSALM, max_chars=500,
-                              clause_gaps=True)
-        assert [p.text for p in plan] == [
-            "ðə lˈɔːɹd ɪz maɪ ʃˈɛpɚd;", "aɪ ʃˈæl nˌɑːt wˈɑːnt,"]
-        assert plan[0].gap_after_ms == CLAUSE_GAP_MS
-        assert plan[-1].gap_after_ms == 0  # nothing after the utterance
+    def test_lighthouse_quote_aware_end_and_dialogue_intro(self):
+        from marmalade_tts.chunking import clause_chunks
+        chunks = clause_chunks(
+            'Then the lighthouse keeper said, "The ship is coming too close '
+            'to the shoreline!" Everyone ran for the rocks below: the horn '
+            "kept sounding; the beam swept the bay; and the crew finally "
+            "turned hard to starboard just before the shallows.")
+        assert self._texts(chunks) == [
+            "Then the lighthouse keeper said,",
+            '"The ship is coming too close to the shoreline!"',
+            "Everyone ran for the rocks below:",
+            "the horn kept sounding;",
+            "the beam swept the bay;",
+            "and the crew finally turned hard to starboard just before the shallows.",
+        ]
+        assert chunks[0].sentence_end is False
+        assert chunks[1].sentence_end is True
+        assert [c.sentence_end for c in chunks[2:5]] == [False, False, False]
+        assert chunks[-1].sentence_end is False
+        assert chunks[0].row_text == chunks[1].row_text
+        assert chunks[0].row_text.endswith('shoreline!"')
+        assert chunks[3].row_text.startswith("Everyone ran")
+        assert chunks[3].row_text == chunks[5].row_text
 
-    def test_sentence_ends_get_the_big_gap(self):
-        from marmalade_tts.chunking import (CLAUSE_GAP_MS,
-                                            CLAUSE_SENT_GAP_MS)
-        plan = ph_stream_plan(PH_DIALOGUE, max_chars=500, clause_gaps=True)
-        sent_gaps = [p.gap_after_ms for p in plan[:-1]]
-        assert CLAUSE_SENT_GAP_MS in sent_gaps
-        assert plan[-1].gap_after_ms == 0
+    def test_attribution_stays_attached_lowercase_after_closing_quote(self):
+        from marmalade_tts.chunking import clause_chunks
+        assert self._texts(clause_chunks(
+            '"Stop!" he shouted. Then he ran.')) == [
+            '"Stop!" he shouted.', "Then he ran."]
 
-    def test_fragments_share_their_sentence_row(self):
-        text = "The Lord is my shepherd; I shall not want."
-        plan = ph_stream_plan(self.PH_PSALM, max_chars=500,
-                              clause_gaps=True, text=text)
-        assert [p.style_ref for p in plan] == [len(text), len(text)]
+    def test_capitalized_word_after_closing_quote_cuts(self):
+        from marmalade_tts.chunking import clause_chunks
+        assert self._texts(clause_chunks(
+            '"Stop!" Marmalade said. Then he ran.')) == [
+            '"Stop!"', "Marmalade said.", "Then he ran."]
 
-    def test_dialogue_comma_before_quote_cuts(self):
-        from marmalade_tts.chunking import _clause_frags
-        assert _clause_frags('ðɛn ðə kˈiːpɚ sˈɛd, "ðə ʃˈɪp ɪz kˈʌmɪŋ,') == [
-            'ðɛn ðə kˈiːpɚ sˈɛd,', '"ðə ʃˈɪp ɪz kˈʌmɪŋ,']
+    def test_psalm_every_clause_mark_is_a_boundary_no_merging(self):
+        from marmalade_tts.chunking import clause_chunks
+        chunks = clause_chunks(
+            "The Lord is my shepherd; I shall not want. He maketh me to lie "
+            "down in green pastures: he leadeth me beside the still waters.")
+        assert self._texts(chunks) == [
+            "The Lord is my shepherd;",
+            "I shall not want.",
+            "He maketh me to lie down in green pastures:",
+            "he leadeth me beside the still waters.",
+        ]
+        assert [c.sentence_end for c in chunks] == [False, True, False, False]
+        assert chunks[0].row_text == "The Lord is my shepherd; I shall not want."
+        assert chunks[0].row_text == chunks[1].row_text
 
-    def test_plain_commas_do_not_cut(self):
-        from marmalade_tts.chunking import _clause_frags
-        run = "jˈeɪ, ðO aɪ wˈɔːk θɹuː ðə vˈæli, aɪ fˈɪɹ nO ˈiːvəl,"
-        assert _clause_frags(run) == [run]
+    def test_list_newline_splits_trailing_comma_is_clause_boundary(self):
+        from marmalade_tts.chunking import clause_chunks
+        chunks = clause_chunks(
+            "Pack the following supplies:\n"
+            "rope and carabiners,\n"
+            "three lanterns,\n"
+            "and the spare compass.\n"
+            "When everything is loaded, meet me at the dock.")
+        assert self._texts(chunks) == [
+            "Pack the following supplies:",
+            "rope and carabiners,",
+            "three lanterns,",
+            "and the spare compass.",
+            "When everything is loaded, meet me at the dock.",
+        ]
+        assert [c.sentence_end for c in chunks] == [
+            True, False, False, True, False]
 
-    def test_mark_inside_closing_quotes_does_not_cut(self):
-        from marmalade_tts.chunking import _clause_frags
-        run = '"stˈɑːp!" hiː ʃˈaʊɾᵻd,'
-        assert _clause_frags(run) == [run]
+    def test_mid_sentence_commas_never_split(self):
+        from marmalade_tts.chunking import clause_chunks
+        assert len(clause_chunks(
+            "Yea, though I walk through the valley, I will fear no evil.")) == 1
 
-    def test_off_by_default_keeps_uniform_gaps(self):
-        from marmalade_tts.chunking import RUN_GAP_MS
-        plan = ph_stream_plan(self.PH_PSALM, max_chars=500)
-        assert len(plan) == 1 or all(
-            p.gap_after_ms in (0, RUN_GAP_MS) for p in plan)
+    def test_blank_input_yields_no_chunks(self):
+        from marmalade_tts.chunking import clause_chunks
+        assert clause_chunks("   ") == []
+
+    def test_single_sentence_has_no_trailing_gap(self):
+        from marmalade_tts.chunking import clause_chunks
+        chunks = clause_chunks("Hello there.")
+        assert len(chunks) == 1
+        assert chunks[0].sentence_end is False
 
     def test_kitten_engine_opts_in(self):
         from marmalade_tts.engines.kitten import KittenEngine
-        assert KittenEngine.CLAUSE_GAPS is True
-        assert KittenEngine.QUOTE_END_RUNS is True
+        assert KittenEngine.TEXT_CLAUSE_PLAN is True
+
+
+class TestTextClausePlan:
+    """stream_play._text_clause_plan builds the piece list the Android
+    engine loop is the mirror of: per-chunk phonemize, no conditioning,
+    graded gaps, style row = pre-split sentence's text length."""
+
+    class _Eng:
+        TEXT_CLAUSE_PLAN = True
+        PHONEME_STREAM = True
+
+        def __init__(self):
+            self.calls = []
+
+        def phonemize(self, text, **kw):
+            self.calls.append(text)
+            return "ph:" + text
+
+    def test_plan_mirrors_the_android_loop(self):
+        from marmalade_tts import stream_play
+        from marmalade_tts.chunking import CLAUSE_GAP_MS, CLAUSE_SENT_GAP_MS
+        eng = self._Eng()
+        text = ("The Lord is my shepherd; I shall not want. "
+                "He restoreth my soul.")
+        plan, fallback = stream_play._phoneme_plan(
+            eng, text, 500, {}, "kitten", None)
+        assert eng.calls == [
+            "The Lord is my shepherd;", "I shall not want.",
+            "He restoreth my soul."]
+        assert [p.text for p in plan] == ["ph:" + c for c in eng.calls]
+        assert [p.gap_after_ms for p in plan] == [
+            CLAUSE_GAP_MS, CLAUSE_SENT_GAP_MS, 0]
+        assert all(p.context is None and p.lookahead is None for p in plan)
+        row = len("The Lord is my shepherd; I shall not want.")
+        assert [p.style_ref for p in plan] == [
+            row, row, len("He restoreth my soul.")]
+
+    def test_daemon_down_falls_back_to_text_path(self):
+        from marmalade_tts import stream_play
+
+        class Down(self._Eng):
+            def phonemize(self, text, **kw):
+                raise OSError("daemon down")
+
+        assert stream_play._phoneme_plan(
+            Down(), "One. Two.", 500, {}, "kitten", None) == (None, None)
 
 
 class TestPadWavEnd:

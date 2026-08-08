@@ -130,7 +130,12 @@ def _phoneme_render(engine, engine_name: str, eng_cfg: dict, processed: str,
         engine.synthesize_phonemes(
             piece.text, path, context=piece.context,
             lookahead=piece.lookahead, style_ref=row,
-            pad_marks=stream_play.PAD_MARKS, **synth_kwargs)
+            # TEXT_CLAUSE_PLAN (kitten): clause marks are chunk-final and
+            # the graded gap carries the pause — Android has no pad-marks
+            # mechanism, so padding here would break exact parity.
+            pad_marks=(None if getattr(engine, "TEXT_CLAUSE_PLAN", None)
+                       is True else stream_play.PAD_MARKS),
+            **synth_kwargs)
         dt = time.monotonic() - t0
         try:
             cond_chars = (len(piece.context or "")

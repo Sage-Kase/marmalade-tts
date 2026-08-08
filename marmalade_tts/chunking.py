@@ -585,28 +585,115 @@ def _run_style_refs(ph: str, ph_runs: list[str], text: str) -> list[int]:
     return [round(len(r) * ratio) for r in ph_runs]
 
 
-def _clause_frags(run: str) -> list[str]:
-    """Split one sentence run at clause boundaries (F rules): after a word
-    ending `;` or `:`, and after a word ending `,` or `:` when the next
-    word opens a quote (the dialogue intro — `said, "…`). A mark buried
-    inside closing quotes (`…!" `) never cuts — the word's last char is
-    the quote, not the mark."""
-    words = run.split()
-    frags: list[str] = []
-    acc: list[str] = []
-    for i, w in enumerate(words):
-        acc.append(w)
-        nxt = words[i + 1] if i + 1 < len(words) else None
-        if nxt is None:
-            break
-        cut = (w[-1] in ";:"
-               or (w[-1] in ",:" and nxt[0] in '"“\''))
-        if cut:
-            frags.append(" ".join(acc))
-            acc = []
-    if acc:
-        frags.append(" ".join(acc))
-    return frags or [run]
+class ClauseChunk:
+    """One chunk of the F plan — EXACT mirror of Android's
+    ``TextChunker.ClauseChunk`` (marmalade-tts-android, c33838e). The two
+    implementations must stay behavior-identical, fixtures and all: Max's
+    parity rule (2026-08-07) is that a chunking bug found on one platform
+    is thereby found on both.
+
+    ``row_text`` is the PRE-SPLIT sentence — style rows must index by its
+    length, not the fragment's, so the register never shifts mid-sentence.
+    ``sentence_end`` True → the engine's sentence gap follows; False →
+    clause gap (`;` `:`, dialogue intro, newline ending in a comma).
+    Always False on the last chunk."""
+
+    __slots__ = ("text", "row_text", "sentence_end")
+
+    def __init__(self, text, row_text, sentence_end):
+        self.text = text
+        self.row_text = row_text
+        self.sentence_end = sentence_end
+
+    def __eq__(self, other):
+        return (isinstance(other, ClauseChunk)
+                and (self.text, self.row_text, self.sentence_end)
+                == (other.text, other.row_text, other.sentence_end))
+
+    def __repr__(self):
+        return (f"ClauseChunk({self.text!r}, {self.row_text!r}, "
+                f"{self.sentence_end})")
+
+
+_TERMINAL_CLOSERS = "\"'”’)]"
+_SENTENCE_OPENERS = "\"“‘'"
+_DIALOGUE_INTRO = re.compile(r'(?<=[,:])\s+(?=["“])')
+_CLAUSE_MARK = re.compile(r"(?<=[:;])\s+")
+
+
+def clause_chunks(text: str) -> list[ClauseChunk]:
+    """The F chunking rules — port of Android ``TextChunker.clauseChunks``:
+    quote-aware sentence ends, newline = sentence boundary, dialogue-intro
+    cut at ``said, "``, clause cuts at ``;`` ``:``, NO merging, never
+    word-split. See the Android original for the full rationale."""
+    out: list[ClauseChunk] = []
+    sentences = _sentences_quote_aware(text.strip())
+    for si, s in enumerate(sentences):
+        frags = [f.strip()
+                 for part in _DIALOGUE_INTRO.split(s)
+                 for f in _CLAUSE_MARK.split(part)
+                 if f.strip()]
+        for fi, f in enumerate(frags):
+            last_of_sentence = fi == len(frags) - 1
+            last_of_text = si == len(sentences) - 1 and last_of_sentence
+            out.append(ClauseChunk(
+                text=f,
+                row_text=s,
+                # A "sentence" ending in a comma is a newline-split
+                # continuation (list item) — comma pause, not period.
+                sentence_end=(last_of_sentence and not last_of_text
+                              and not s.endswith(",")),
+            ))
+    return out
+
+
+def _sentences_quote_aware(text: str) -> list[str]:
+    """Port of Android ``sentencesQuoteAware``: ``.!?`` + optional closing
+    quotes/brackets ends a sentence; with closers present the next word
+    must start uppercase/digit/opening-quote (lowercase = attribution,
+    stays attached). Plain ``.!?`` + whitespace always cuts. Newlines and
+    CJK enders (。！？) are sentence boundaries too."""
+    out: list[str] = []
+    start = 0
+    i = 0
+
+    def emit(end_exclusive):
+        t = text[start:end_exclusive].strip()
+        if t:
+            out.append(t)
+
+    while i < len(text):
+        c = text[i]
+        if c == "\n":
+            emit(i)
+            while i < len(text) and text[i].isspace():
+                i += 1
+            start = i
+        elif c in "。！？":
+            emit(i + 1)
+            i += 1
+            start = i
+        elif c in ".!?":
+            j = i + 1
+            while j < len(text) and text[j] in _TERMINAL_CLOSERS:
+                j += 1
+            k = j
+            while k < len(text) and text[k].isspace():
+                k += 1
+            if k > j and k < len(text):
+                nxt = text[k]
+                plain = j == i + 1
+                if (plain or nxt.isupper() or nxt.isdigit()
+                        or nxt in _SENTENCE_OPENERS):
+                    emit(j)
+                    start = k
+                    i = k
+                    continue
+            i = j
+        else:
+            i += 1
+    emit(len(text))
+    return out
 
 
 def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
@@ -615,8 +702,7 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
                    text: "str | None" = None,
                    ph_rows: bool = False,
                    split_quote_ends: bool = False,
-                   eager_head: bool = False,
-                   clause_gaps: bool = False) -> list[PhPiece]:
+                   eager_head: bool = False) -> list[PhPiece]:
     """The full streaming plan for one phonemized utterance.
 
     ``text`` is the pre-phonemization utterance; when given, each run's
@@ -625,11 +711,9 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
     (kokoro indexes its pack by phoneme count — ``pack[len(ps)-1]``).
     With neither, ``style_ref`` stays None and the caller picks a row.
     ``split_quote_ends`` is ph_sentence_runs' flag, ``eager_head`` is
-    ``eager_head_cut``, ``clause_gaps`` is the F graded-gap mode (all
-    engine opt-ins). With ``clause_gaps``, every clause mark becomes a
-    real boundary — ``CLAUSE_GAP_MS`` after clauses, ``CLAUSE_SENT_GAP_MS``
-    after sentences (``gap_ms`` is ignored) — and fragments keep their
-    sentence's style row."""
+    ``eager_head_cut`` (both engine opt-ins). Engines with
+    ``TEXT_CLAUSE_PLAN`` (kitten) never reach this — they plan in text
+    space via ``clause_chunks`` for exact Android parity."""
     if band is None:
         band = band_for_rtf(None)
     runs = ph_sentence_runs(ph, keep_marks, split_quote_ends)
@@ -639,24 +723,8 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
         rows = [max(0, len(r) - 1) for r in runs]
     else:
         rows = [None] * len(runs)
-
-    # (unit_text, style_row, gap_after_final_subchunk_ms)
-    units: list[tuple] = []
-    for ri, run in enumerate(runs):
-        last_run = ri == len(runs) - 1
-        if clause_gaps:
-            frags = _clause_frags(run)
-            for fi, f in enumerate(frags):
-                sentence_end = fi == len(frags) - 1
-                gap = (0 if last_run and sentence_end
-                       else CLAUSE_SENT_GAP_MS if sentence_end
-                       else CLAUSE_GAP_MS)
-                units.append((f, rows[ri], gap))
-        else:
-            units.append((run, rows[ri], 0 if last_run else gap_ms))
-
     pieces: list[PhPiece] = []
-    for run, row, unit_gap in units:
+    for ri, run in enumerate(runs):
         t = band.ramp[min(len(pieces), len(band.ramp) - 1)]
         if eager_head and not pieces:
             head = eager_head_cut(run, t)
@@ -664,7 +732,8 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
                 pref, run, gap, la_units = head
                 la = (" ".join(run.split()[:la_units]) or None) \
                     if la_units else None
-                pieces.append(PhPiece(pref, None, la, gap, style_ref=row))
+                pieces.append(PhPiece(pref, None, la, gap,
+                                      style_ref=rows[ri]))
                 t = band.ramp[min(len(pieces), len(band.ramp) - 1)]
         # A sentence within WHOLE_TOL of its ramp target stays whole
         # (K1-4b): a sentence end is a free unconditioned boundary with
@@ -677,6 +746,7 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
             ramp = (band.long_start
                     if band.long_start and not pieces else band.ramp)
             subs = ph_pack(run, max_chars, step=len(pieces), ramp=ramp)
+        last_run = ri == len(runs) - 1
         for i, s in enumerate(subs):
             last_sub = i == len(subs) - 1
             ctx = (" ".join(subs[i - 1].split()[-band.context_units:])
@@ -684,8 +754,8 @@ def ph_stream_plan(ph: str, max_chars: int, keep_marks: str = "",
             la = (" ".join(subs[i + 1].split()[:band.lookahead_units])
                   if not last_sub and band.lookahead_units else None)
             pieces.append(PhPiece(
-                s, ctx, la, unit_gap if last_sub else 0,
-                style_ref=row))
+                s, ctx, la, gap_ms if last_sub and not last_run else 0,
+                style_ref=rows[ri]))
     return pieces
 
 

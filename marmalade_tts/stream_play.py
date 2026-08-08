@@ -132,6 +132,13 @@ def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict,
     marginal RTF."""
     if not getattr(engine, "PHONEME_STREAM", False):
         return None, None
+    # Text-space F plan (kitten): EXACT mirror of Android's pipeline —
+    # clause_chunks boundaries, per-chunk phonemize+render with no
+    # conditioning, style row = pre-split sentence's TEXT length, graded
+    # gaps. Max's parity rule (2026-08-07): the platforms must chunk and
+    # render identically so a bug in one is a bug found in both.
+    if getattr(engine, "TEXT_CLAUSE_PLAN", None) is True:
+        return _text_clause_plan(engine, text, synth_kwargs)
     try:
         ph = engine.phonemize(text, **synth_kwargs)
     except Exception:  # daemon down, engine mid-refactor — use the text path
@@ -164,14 +171,40 @@ def _phoneme_plan(engine, text: str, max_chars: int, synth_kwargs: dict,
         ph_rows=(mode == "ph-sentence"),
         # Strict identity checks: mocked engines return truthy attributes.
         split_quote_ends=getattr(engine, "QUOTE_END_RUNS", None) is True,
-        eager_head=getattr(engine, "EAGER_HEAD", None) is True,
-        clause_gaps=getattr(engine, "CLAUSE_GAPS", None) is True)
+        eager_head=getattr(engine, "EAGER_HEAD", None) is True)
     if plan and banded:
         perfstats.set_band(engine_name, mkey, band.name)
     # Pieces carry per-run style rows; the second value is the fallback for
     # a piece without one (mode-matched: ph-length rule for the ph modes).
     fallback = max(0, len(ph) - 1) if mode != "text-sentence" else len(ph)
     return (plan, fallback) if plan else (None, None)
+
+
+def _text_clause_plan(engine, text: str, synth_kwargs: dict):
+    """(plan, fallback_style_ref) for TEXT_CLAUSE_PLAN engines: one PhPiece
+    per ``chunking.clause_chunks`` chunk, phonemized independently (exactly
+    like Android's per-chunk espeak call — no cross-chunk phonemization
+    context), no seam conditioning, gap graded by boundary type. The
+    renderer skips pad_marks for these plans — a clause mark is always
+    chunk-final here and the graded gap already carries its pause."""
+    chunks = chunking.clause_chunks(text)
+    if not chunks:
+        return None, None
+    pieces = []
+    for i, c in enumerate(chunks):
+        try:
+            ph = engine.phonemize(c.text, **synth_kwargs)
+        except Exception:  # daemon down — caller falls back to text path
+            return None, None
+        if not ph or not ph.strip():
+            continue
+        last = i == len(chunks) - 1
+        gap = (0 if last
+               else chunking.CLAUSE_SENT_GAP_MS if c.sentence_end
+               else chunking.CLAUSE_GAP_MS)
+        pieces.append(chunking.PhPiece(
+            ph, None, None, gap, style_ref=len(c.row_text)))
+    return (pieces, len(text)) if pieces else (None, None)
 
 
 def _effective_workers(engine, n_rest: int) -> int:
@@ -252,7 +285,11 @@ def try_stream_single(
             engine.synthesize_phonemes(
                 piece.text, tmp_paths[i], context=piece.context,
                 lookahead=piece.lookahead, style_ref=row,
-                pad_marks=PAD_MARKS, **kwargs)
+                # TEXT_CLAUSE_PLAN: clause marks are chunk-final and the
+                # graded gap carries the pause — padding would double it.
+                pad_marks=(None if getattr(engine, "TEXT_CLAUSE_PLAN", None)
+                           is True else PAD_MARKS),
+                **kwargs)
         else:
             if use_context and i > 0:
                 kwargs["context"] = " ".join(
