@@ -43,12 +43,27 @@ def test_detects_modern_sentences(text, expected):
     # Long kana-free Han run with no markers: real Japanese this long
     # would carry kana, so it reads Chinese.
     ("山川草木花鳥風月", "zh"),
-    # Short unmarked Han run — could be either language; abstain.
+    # Short unmarked Han run — could be either language; with a
+    # non-CJK system locale (the test env), abstain.
     ("水草", None),
     ("明日", None),
 ])
 def test_script_check(text, expected):
     assert langdetect.detect(text) == expected
+
+
+@pytest.mark.parametrize("system_lang,expected", [
+    ("ja", "ja"),
+    ("zh", "zh"),
+    # A Latin-language system default says nothing about Han text.
+    ("en", None),
+])
+def test_short_ambiguous_han_falls_back_to_a_cjk_system_default(system_lang, expected):
+    det = langdetect.LangDetector(system_lang=system_lang)
+    assert det.detect("明日") == expected
+    # Markers and length still outrank the system default.
+    assert det.detect("我们的时间不多了") == "zh"
+    assert det.detect("東京駅集合") == "ja"
 
 
 # Accuracy battery: varied register per language — casual speech, UI-string

@@ -84,8 +84,27 @@ _HAN_JA = set("込働峠畑辻枠匂塀笹図円売読絵駅験単桜気帰歯�
 
 # A kana-free Han run this long is Chinese: real Japanese sentences carry
 # kana within a few characters (okurigana, particles). Below it, an
-# unmarked Han run could be either — abstain and let the fallback decide.
+# unmarked Han run could be either — the system default language breaks
+# the tie when it is itself ja or zh (Max, 2026-08-08); any other default
+# says nothing about Han text, so the detector abstains.
 _HAN_ZH_MIN = 6
+
+
+def _system_cjk_lang() -> str | None:
+    """"ja" or "zh" when the system locale is one of them, else None."""
+    loc = os.environ.get("LC_ALL") or os.environ.get("LANG") or ""
+    if not loc:
+        import locale
+        try:
+            loc = locale.getlocale()[0] or ""
+        except ValueError:
+            loc = ""
+    loc = loc.lower()
+    if loc.startswith("ja"):
+        return "ja"
+    if loc.startswith("zh"):
+        return "zh"
+    return None
 
 
 def _is_kana(cp: int) -> bool:
@@ -108,7 +127,12 @@ def _is_devanagari(cp: int) -> bool:
 class LangDetector:
     """Loaded trigram table plus the two detection stages."""
 
-    def __init__(self, table_path: str = TABLE_PATH):
+    def __init__(self, table_path: str = TABLE_PATH,
+                 system_lang: str | None = None):
+        # The Han-ambiguity tiebreak. `system_lang` is an ISO code override
+        # for tests; the default reads the process locale once.
+        self._sys_cjk = (system_lang if system_lang in ("ja", "zh")
+                         else None if system_lang else _system_cjk_lang())
         with open(table_path, encoding="utf-8") as f:
             lines = f.read().splitlines()
         if lines[0] != "marmalade-langdetect 1":
@@ -147,14 +171,15 @@ class LangDetector:
             return None
         return self._trigram_detect(text)
 
-    @staticmethod
-    def _han_detect(text: str, han: int) -> str | None:
+    def _han_detect(self, text: str, han: int) -> str | None:
         """zh/ja for a kana-free Han run — see the marker-set comment."""
         if any(ch in _HAN_ZH for ch in text):
             return "zh"
         if any(ch in _HAN_JA for ch in text):
             return "ja"
-        return "zh" if han >= _HAN_ZH_MIN else None
+        if han >= _HAN_ZH_MIN:
+            return "zh"
+        return self._sys_cjk
 
     def _trigram_detect(self, text: str) -> str | None:
         chars = [c if c.isalpha() else " " for c in text.lower()]
