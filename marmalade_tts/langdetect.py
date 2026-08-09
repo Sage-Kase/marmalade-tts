@@ -65,6 +65,29 @@ _ESPEAK_LANG = {
 }
 
 
+# Han-only text (no kana) needs a zh/ja tiebreak. Each set holds characters
+# effectively exclusive to one language's modern writing:
+#   _HAN_ZH — PRC simplifications that differ from Japanese shinjitai
+#     (这≠這, 时≠時, 读≠読 …), Chinese-only grammar/pronoun characters
+#     (们 吗 呢 吧 你 她), and their traditional forms where Japanese uses a
+#     different glyph (們 嗎 讓 麼 沒 氣).
+#   _HAN_JA — kokuji (characters coined in Japan: 込 働 峠 …) and shinjitai
+#     that differ from BOTH the simplified and traditional Chinese forms
+#     (図≠图/圖, 円≠圆/圓, 気≠气/氣 …).
+# Shared-glyph characters (国 学 会 写 没 万 …) are deliberately absent.
+# Mirrored in Android's LangDetector.kt — keep the two in lockstep.
+_HAN_ZH = set(
+    "这说对时东车书长门问间语读关开见觉认识谁让过还进远边达选们么军动头"
+    "买卖妈红电华个为从发汉现乐你她它吗呢吧哪咱啥們嗎讓麼沒氣"
+)
+_HAN_JA = set("込働峠畑辻枠匂塀笹図円売読絵駅験単桜気帰歯労楽実徳縄渋択沢変遅剣塩拝恵姫黒悪圧")
+
+# A kana-free Han run this long is Chinese: real Japanese sentences carry
+# kana within a few characters (okurigana, particles). Below it, an
+# unmarked Han run could be either — abstain and let the fallback decide.
+_HAN_ZH_MIN = 6
+
+
 def _is_kana(cp: int) -> bool:
     return 0x3040 <= cp <= 0x30FF or 0x31F0 <= cp <= 0x31FF or 0xFF66 <= cp <= 0xFF9F
 
@@ -115,12 +138,23 @@ class LangDetector:
                 latin += 1
         cjk = kana + han
         if cjk > 0 and cjk >= latin:
-            return "ja" if kana > 0 else "zh"
+            if kana > 0:
+                return "ja"
+            return self._han_detect(text, han)
         if deva > 0 and deva >= latin:
             return "hi"
         if latin == 0:
             return None
         return self._trigram_detect(text)
+
+    @staticmethod
+    def _han_detect(text: str, han: int) -> str | None:
+        """zh/ja for a kana-free Han run — see the marker-set comment."""
+        if any(ch in _HAN_ZH for ch in text):
+            return "zh"
+        if any(ch in _HAN_JA for ch in text):
+            return "ja"
+        return "zh" if han >= _HAN_ZH_MIN else None
 
     def _trigram_detect(self, text: str) -> str | None:
         chars = [c if c.isalpha() else " " for c in text.lower()]

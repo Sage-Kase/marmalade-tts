@@ -29,6 +29,23 @@ def test_detects_modern_sentences(text, expected):
     ("नमस्ते आप कैसे हैं", "hi"),
     # Kana present alongside Han → Japanese, not Mandarin.
     ("東京タワーは高いです", "ja"),
+    # ── kana-free Han runs (Max, 2026-08-08): marker sets, then length ──
+    # Simplified forms that differ from shinjitai confirm Chinese.
+    ("我们的时间不多了", "zh"),
+    # Chinese-only pronoun in an otherwise shared-glyph traditional phrase.
+    ("謝謝你", "zh"),
+    # Traditional forms Japanese doesn't use (們, 氣).
+    ("我們去公園散步", "zh"),
+    # Shinjitai unique to Japan (駅) — a station sign has no kana.
+    ("東京駅集合", "ja"),
+    # Kokuji (working/coined-in-Japan characters).
+    ("受付方法申込", "ja"),
+    # Long kana-free Han run with no markers: real Japanese this long
+    # would carry kana, so it reads Chinese.
+    ("山川草木花鳥風月", "zh"),
+    # Short unmarked Han run — could be either language; abstain.
+    ("水草", None),
+    ("明日", None),
 ])
 def test_script_check(text, expected):
     assert langdetect.detect(text) == expected
