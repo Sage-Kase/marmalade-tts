@@ -355,3 +355,53 @@ def test_detection_runs_once_per_utterance_not_per_chunk(tmp_path, monkeypatch):
     assert calls[0] == text
     langs = {c.kwargs.get("lang") for c in engine.synthesize.call_args_list}
     assert langs == {"f"}
+
+
+# ---------------------------------------------------------------------------
+# Short-text margin ramp (Max, 2026-08-09: "button" spoke Italian)
+# ---------------------------------------------------------------------------
+# Below SHORT_TRIGRAMS the required margin ramps up steeply: common English
+# words score junk margins on 6-11 trigrams that a flat threshold cannot
+# separate from real foreign text. English input must NEVER come back as a
+# non-English language — "en" and None (fall back to the alias language)
+# are both fine. Tuning data: ~/coding/scratch/langdetect-short/.
+
+ENGLISH_SHORTS = [
+    "button", "hello", "menu", "system", "pause", "volume", "language",
+    "settings", "voice", "camera", "message", "calendar", "computer",
+    "important", "different", "application", "developer", "calculator",
+    "no", "done", "undo", "close", "delete", "cancel", "resume",
+    "no signal", "well done", "turn it up", "good morning",
+]
+
+
+@pytest.mark.parametrize("text", ENGLISH_SHORTS)
+def test_short_english_never_switches_language(text):
+    assert langdetect.detect(text) in ("en", None)
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("bonjour à tous", "fr"),
+    ("merci beaucoup", "fr"),
+    ("à bientôt", "fr"),
+    ("buenos días", "es"),
+    ("¿cómo estás?", "es"),
+    ("hasta mañana", "es"),
+    ("grazie mille", "it"),
+    ("va bene così", "it"),
+    ("arrivederci amici", "it"),
+    ("muito obrigado", "pt"),
+    ("até amanhã", "pt"),
+    ("bom dia pessoal", "pt"),
+])
+def test_short_but_decisive_foreign_still_detects(text, expected):
+    assert langdetect.detect(text) == expected
+
+
+def test_required_margin_ramp_shape():
+    # Flat MIN_MARGIN from SHORT_TRIGRAMS up; SHORT_MARGIN at the floor.
+    assert langdetect._required_margin(langdetect.SHORT_TRIGRAMS) == langdetect.MIN_MARGIN
+    assert langdetect._required_margin(1000) == langdetect.MIN_MARGIN
+    assert langdetect._required_margin(langdetect.MIN_TRIGRAMS) == langdetect.SHORT_MARGIN
+    mid = (langdetect.MIN_TRIGRAMS + langdetect.SHORT_TRIGRAMS) // 2
+    assert langdetect.MIN_MARGIN < langdetect._required_margin(mid) < langdetect.SHORT_MARGIN

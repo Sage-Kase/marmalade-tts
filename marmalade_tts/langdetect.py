@@ -25,9 +25,31 @@ TABLE_PATH = os.path.join(os.path.dirname(__file__), "langdetect.tab")
 
 _SPACES = re.compile(r"\s+")
 
-# Stage-2 tuning (validated by tools/langdetect-train/validate.py).
-MIN_TRIGRAMS = 6      # below this the guess is noise -> None
-MIN_MARGIN = 2.0      # scaled-cost gap per trigram between best and runner-up
+# Stage-2 tuning (validated by tools/langdetect-train/validate.py; the
+# short-text ramp by ~/coding/scratch/langdetect-short/experiment.py,
+# Max's 2026-08-09 "button spoke Italian" report).
+#
+# Short text needs decisively stronger evidence to call a language: common
+# English words score junk margins up to ~15 below 8 trigrams (no
+# threshold separates them there — abstain outright), and up to ~5.7 in
+# the 8-23 band, while genuinely foreign short phrases score 10-45. The
+# required margin ramps linearly from SHORT_MARGIN at MIN_TRIGRAMS down
+# to MIN_MARGIN at SHORT_TRIGRAMS, leaving the original 25-200 char
+# tuning untouched. An abstention falls back to the caller's language
+# precedence (the alias/request language), which is the sticky-default
+# behavior Max picked.
+MIN_TRIGRAMS = 8       # below this the guess is noise -> None
+MIN_MARGIN = 2.0       # scaled-cost gap per trigram between best and runner-up
+SHORT_TRIGRAMS = 24    # ramp end: text this long uses MIN_MARGIN unchanged
+SHORT_MARGIN = 8.0     # required margin at exactly MIN_TRIGRAMS trigrams
+
+
+def _required_margin(n_tri: int) -> float:
+    """The margin a verdict must clear at this evidence length."""
+    if n_tri >= SHORT_TRIGRAMS:
+        return MIN_MARGIN
+    frac = (SHORT_TRIGRAMS - n_tri) / (SHORT_TRIGRAMS - MIN_TRIGRAMS)
+    return MIN_MARGIN + (SHORT_MARGIN - MIN_MARGIN) * frac
 
 # Detected language -> kokoro (misaki) single-letter code. "en" is resolved
 # against the voice's own English variant: en-US vs en-GB is never guessed
@@ -201,7 +223,7 @@ class LangDetector:
                     totals[li] += row[li]
         order = sorted(range(len(self.langs)), key=lambda li: totals[li])
         best, second = order[0], order[1]
-        if (totals[second] - totals[best]) / n_tri < MIN_MARGIN:
+        if (totals[second] - totals[best]) / n_tri < _required_margin(n_tri):
             return None
         return self.langs[best]
 
