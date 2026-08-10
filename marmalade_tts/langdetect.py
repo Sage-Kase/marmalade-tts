@@ -26,8 +26,8 @@ TABLE_PATH = os.path.join(os.path.dirname(__file__), "langdetect.tab")
 _SPACES = re.compile(r"\s+")
 
 # Stage-2 tuning (validated by tools/langdetect-train/validate.py; the
-# short-text ramp by ~/coding/scratch/langdetect-short/experiment.py,
-# Max's 2026-08-09 "button spoke Italian" report).
+# short-text ramp tuned on a battery of 100+ common English words/short
+# phrases vs 20 short foreign phrases — see tests/test_langdetect.py).
 #
 # Short text needs decisively stronger evidence to call a language: common
 # English words score junk margins up to ~15 below 8 trigrams (no
