@@ -17,6 +17,10 @@ from marmalade_tts.engines.api import ApiEngine, DEFAULT_BASE_URL
 
 def make_engine(**cfg):
     cfg.setdefault("api_key", "test-key")
+    # Neutralize the key COMMAND default (the marmalade keyring) — on a dev
+    # box it can genuinely succeed and shadow the paths a test steers.
+    # Cmd-resolution has its own test class below.
+    cfg.setdefault("api_key_cmd", "")
     return ApiEngine(cfg)
 
 
@@ -42,20 +46,63 @@ class TestConfig:
 
 class TestApiKey:
     def test_inline_key_wins(self):
-        eng = ApiEngine({"api_key": "inline", "api_key_env": "MISSING_VAR_X"})
+        eng = ApiEngine({"api_key": "inline", "api_key_cmd": "",
+                         "api_key_env": "MISSING_VAR_X"})
         assert eng._api_key() == "inline"
 
     def test_env_var_fallback(self):
-        eng = ApiEngine({"api_key_env": "MARMALADE_TEST_KEY"})
+        eng = ApiEngine({"api_key_cmd": "", "api_key_env": "MARMALADE_TEST_KEY"})
         with patch.dict(os.environ, {"MARMALADE_TEST_KEY": "from-env"}):
             assert eng._api_key() == "from-env"
 
     def test_missing_key_raises_with_env_name(self):
-        eng = ApiEngine({"api_key_env": "MARMALADE_TEST_MISSING"})
+        eng = ApiEngine({"api_key_cmd": "",
+                         "api_key_env": "MARMALADE_TEST_MISSING"})
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(EngineError) as exc:
                 eng._api_key()
         assert "MARMALADE_TEST_MISSING" in str(exc.value)
+
+
+class TestApiKeyCommand:
+    """cmd → inline → env; the cmd default is the marmalade keyring."""
+
+    def test_command_wins_over_inline_and_env(self):
+        eng = ApiEngine({"api_key_cmd": "printf cmd-key", "api_key": "inline"})
+        assert eng._api_key() == "cmd-key"
+
+    def test_failing_command_falls_back_to_inline(self):
+        eng = ApiEngine({"api_key_cmd": "false", "api_key": "inline"})
+        assert eng._api_key() == "inline"
+
+    def test_missing_binary_falls_back(self):
+        eng = ApiEngine({"api_key_cmd": "not-a-real-binary-9f2 get x",
+                         "api_key": "inline"})
+        assert eng._api_key() == "inline"
+
+    def test_empty_stdout_is_not_a_key(self):
+        eng = ApiEngine({"api_key_cmd": "printf ''", "api_key": "inline"})
+        assert eng._api_key() == "inline"
+
+    def test_success_cached_per_instance(self, tmp_path):
+        marker = tmp_path / "ran"
+        eng = ApiEngine({"api_key_cmd":
+                         f"sh -c 'echo run >> {marker}; printf cmd-key'"})
+        assert eng._api_key() == "cmd-key"
+        assert eng._api_key() == "cmd-key"
+        assert marker.read_text().count("run") == 1
+
+    def test_failure_cached_per_instance(self, tmp_path):
+        marker = tmp_path / "ran"
+        eng = ApiEngine({"api_key_cmd": f"sh -c 'echo run >> {marker}; false'",
+                         "api_key": "inline"})
+        assert eng._api_key() == "inline"
+        assert eng._api_key() == "inline"
+        assert marker.read_text().count("run") == 1
+
+    def test_default_cmd_is_the_marmalade_keyring(self):
+        from marmalade_tts.engines.api import DEFAULT_KEY_CMD
+        assert DEFAULT_KEY_CMD == "marmalade secret get venice/api-key"
 
 
 class TestSynthesize:
@@ -136,7 +183,8 @@ class TestSynthesize:
         assert "ffmpeg" in str(exc.value)
 
     def test_missing_key_fails_before_any_request(self, tmp_path):
-        eng = ApiEngine({"api_key_env": "MARMALADE_TEST_MISSING"})
+        eng = ApiEngine({"api_key_cmd": "",
+                         "api_key_env": "MARMALADE_TEST_MISSING"})
         with patch.dict(os.environ, {}, clear=True), \
              patch("marmalade_tts.engines.api.urllib.request.urlopen") as mock_open:
             with pytest.raises(EngineError):

@@ -36,7 +36,7 @@ CONFIG_PATHS = [
     "engines.emojivoice.voice", "engines.emojivoice.device", "engines.emojivoice.daemon",
     "engines.emojivoice.steps", "engines.emojivoice.temperature",
     "engines.api.base_url", "engines.api.model", "engines.api.voice",
-    "engines.api.api_key_env", "engines.api.timeout",
+    "engines.api.api_key_cmd", "engines.api.api_key_env", "engines.api.timeout",
     "presets.fast.kitten", "presets.fast.kokoro", "presets.fast.piper",
     "presets.fast.coqui", "presets.fast.pocket", "presets.fast.matcha",
     "presets.fast.emojivoice",

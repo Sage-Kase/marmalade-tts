@@ -115,8 +115,9 @@ engines:
     base_url: https://api.venice.ai/api/v1
     model: tts-kokoro        # marmalade-tts api --list shows the live lineup
     voice: af_heart
-    api_key_env: VENICE_API_KEY  # env var the key is read from
-    # api_key: sk-...        # inline key (env var preferred)
+    api_key_cmd: marmalade secret get venice/api-key  # the marmalade keyring; fails soft
+    api_key_env: VENICE_API_KEY  # fallback env var
+    # api_key: sk-...        # deprecated: plaintext secret in a config file
     # timeout: 120           # seconds per request
     # extra:                 # provider-specific payload passthrough, e.g.
     #   instructions: "Speak warmly"   # (OpenAI gpt-4o-mini-tts)

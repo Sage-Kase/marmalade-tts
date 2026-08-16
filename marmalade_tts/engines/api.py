@@ -11,14 +11,21 @@ time-to-first-audio is just the network round trip plus server-side
 synthesis.
 
 Key resolution order:
-  1. ``engines.api.api_key`` in config.yaml (discouraged — config files
-     get pasted into issues; prefer the env var)
-  2. the environment variable named by ``engines.api.api_key_env``
+  1. ``engines.api.api_key_cmd`` — a command whose stdout is the key.
+     Default ``marmalade secret get venice/api-key`` (the marmalade
+     keyring — see the core repo's docs/conventions/secrets.md). Fails
+     soft: missing binary, no entry, locked store → fall through. If you
+     repoint ``base_url`` at another provider, change this (or the env)
+     to match — the defaults target Venice as a set.
+  2. ``engines.api.api_key`` in config.yaml (deprecated — a plaintext
+     secret in a config file gets pasted into issues; use the keyring)
+  3. the environment variable named by ``engines.api.api_key_env``
      (default ``VENICE_API_KEY``)
 """
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -30,6 +37,7 @@ from . import Engine, EngineError
 DEFAULT_BASE_URL = "https://api.venice.ai/api/v1"
 DEFAULT_MODEL = "tts-kokoro"
 DEFAULT_VOICE = "af_heart"
+DEFAULT_KEY_CMD = "marmalade secret get venice/api-key"
 DEFAULT_KEY_ENV = "VENICE_API_KEY"
 
 # Venice's tts-kokoro voices (canonical kokoro IDs). Used for shell
@@ -55,9 +63,39 @@ class ApiEngine(Engine):
         # Provider-specific payload extras (e.g. OpenAI's ``instructions``)
         # pass through verbatim — see config-default.yaml.
         self.extra = cfg.get("extra") or {}
+        # api_key_cmd result cache: None = not tried, "" = tried and failed.
+        self._cmd_key: "str | None" = None
+
+    def _key_from_cmd(self) -> "str | None":
+        """Run ``api_key_cmd``; stdout (stripped) is the key.
+
+        Fails soft on every path — no command, missing binary, non-zero
+        exit, empty stdout, timeout — so the config/env fallbacks apply.
+        stdin is /dev/null with a hard timeout: a locked password store
+        must fail here, not hang the synth. Success is cached on the
+        instance (one process = one CLI run or one daemon lifetime).
+        """
+        if self._cmd_key is not None:
+            return self._cmd_key or None
+        cmd = (self.cfg.get("api_key_cmd", DEFAULT_KEY_CMD) or "").strip()
+        if not cmd:
+            self._cmd_key = ""
+            return None
+        try:
+            out = subprocess.run(shlex.split(cmd), capture_output=True,
+                                 stdin=subprocess.DEVNULL, timeout=10)
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            self._cmd_key = ""
+            return None
+        self._cmd_key = ("" if out.returncode != 0
+                         else out.stdout.decode("utf-8", "replace").strip())
+        return self._cmd_key or None
 
     def _api_key(self) -> str:
-        key = self.cfg.get("api_key")
+        key = self._key_from_cmd()
+        if key:
+            return key
+        key = self.cfg.get("api_key")  # deprecated: plaintext in config.yaml
         if key:
             return key
         env_name = self.cfg.get("api_key_env", DEFAULT_KEY_ENV)
@@ -66,8 +104,9 @@ class ApiEngine(Engine):
             return key
         raise EngineError(
             f"[api] No API key found.\n"
-            f"  Set the {env_name} environment variable, or put the key in\n"
-            f"  config.yaml under engines.api.api_key (env var preferred)."
+            f"  Store one with `marmalade secret set venice/api-key` (the\n"
+            f"  default engines.api.api_key_cmd reads it), or set the\n"
+            f"  {env_name} environment variable."
         )
 
     def synthesize(self, text: str, out_path: str, voice: str = None,

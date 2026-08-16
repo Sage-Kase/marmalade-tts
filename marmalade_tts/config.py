@@ -73,8 +73,13 @@ DEFAULT_CONFIG = {
             "base_url": "https://api.venice.ai/api/v1",
             "model": "tts-kokoro",
             "voice": "af_heart",
+            # Key resolution: command → inline api_key (deprecated) → env.
+            # The command default is the marmalade keyring (core repo's
+            # docs/conventions/secrets.md); repointing base_url at another
+            # provider means changing the cmd/env to match.
+            "api_key_cmd": "marmalade secret get venice/api-key",
             "api_key_env": "VENICE_API_KEY",
-            # api_key: sk-...       # inline key (env var preferred)
+            # api_key: sk-...       # deprecated: plaintext in config.yaml
             # timeout: 120
             # extra: {}             # provider-specific payload passthrough
         },

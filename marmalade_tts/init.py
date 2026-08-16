@@ -116,7 +116,8 @@ ENGINE_INFO = {
                 "validate": lambda v: bool(v),
                 "help": ("Venice tts-kokoro voice IDs shown; other models/providers "
                          "have their own — run `marmalade-tts api --list`. "
-                         "Set VENICE_API_KEY (or engines.api.api_key_env) before use."),
+                         "Key: `marmalade secret set venice/api-key` (the keyring "
+                         "default), or set VENICE_API_KEY before use."),
             },
         },
     },
