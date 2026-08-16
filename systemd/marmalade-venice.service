@@ -1,0 +1,20 @@
+[Unit]
+Description=Marmalade TTS — Venice cloud TTS daemon (no local model)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# No venv: the daemon is stdlib-only (urllib), so the system python3 runs it.
+ExecStart=/usr/bin/python3 \
+    %h/.local/share/marmalade-tts/daemon/venice-daemon.py
+Restart=on-failure
+RestartSec=5
+Environment=VENICE_MODEL=tts-kokoro
+Environment=VENICE_VOICE=af_heart
+Environment=VENICE_API_KEY_FILE=%h/.config/marmalade-tts/venice-api-key
+Environment=VENICE_API_KEY_ENV=VENICE_API_KEY
+Environment=VENICE_TIMEOUT=30
+
+[Install]
+WantedBy=default.target

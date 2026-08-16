@@ -121,6 +121,24 @@ engines:
     # extra:                 # provider-specific payload passthrough, e.g.
     #   instructions: "Speak warmly"   # (OpenAI gpt-4o-mini-tts)
 
+  venice:
+    # Daemon-only engine: `marmalade-tts daemon start --engine venice`
+    # serves Venice cloud TTS over the marmalade-tts socket protocol, so a
+    # machine with no local model in RAM (or one wanting better voices than
+    # local kokoro/piper) can be served by any existing daemon client with
+    # zero changes — just point it at venice.sock. For the CLI itself, use
+    # the `api` engine above.
+    # PRIVACY: this sends your text to Venice's servers. Opt-in — the local
+    # engines are unaffected.
+    model: tts-kokoro        # also tts-elevenlabs-turbo-v2-5, tts-chatterbox-hd,
+                             # tts-minimax-speech-02-hd, tts-orpheus, tts-qwen3-*
+                             # (a model that ignores response_format=wav errors
+                             # rather than writing unplayable audio)
+    voice: af_heart          # model-specific; `marmalade-tts api --list` shows them
+    api_key_file: ~/.config/marmalade-tts/venice-api-key   # chmod 600
+    api_key_env: VENICE_API_KEY   # fallback if the key file is absent
+    timeout: 30              # seconds per request
+
 # Audio effects — requires sox (apt install sox)
 # Custom presets combine built-in effects. Use --list-effects to see all options.
 #

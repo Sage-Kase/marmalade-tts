@@ -354,6 +354,10 @@ which beats a cold local engine by a wide margin. Provider-specific request
 fields pass through via `engines.api.extra`. Needs network and a funded
 API key; keep a local engine configured as your offline fallback.
 
+There is also a **[`venice` daemon](#the-venice-daemon-cloud-no-local-model)**
+— the same cloud TTS served over the daemon socket protocol, so clients that
+talk to marmalade-tts daemons (rather than the CLI) can use it unchanged.
+
 ---
 
 ## Voice aliases / personas
@@ -602,6 +606,44 @@ than silently synthesized with the wrong model:
 marmalade-tts daemon stop --engine kitten   # it auto-starts again on next use
 ```
 
+### The `venice` daemon (cloud, no local model)
+
+One daemon has no model to keep warm: `venice` serves
+[Venice](https://venice.ai) cloud TTS over the same Unix-socket protocol as
+every other daemon. It exists for hardware too weak to hold a local model in
+RAM, and for anyone who wants better voices than local kokoro/piper. Any
+client that already speaks the daemon protocol gets cloud TTS with **no code
+changes** — point it at `~/.local/share/marmalade-tts/venice.sock`.
+
+```sh
+mkdir -p ~/.config/marmalade-tts
+printf '%s' "$VENICE_KEY" > ~/.config/marmalade-tts/venice-api-key
+chmod 600 ~/.config/marmalade-tts/venice-api-key
+
+marmalade-tts daemon start --engine venice
+```
+
+```yaml
+engines:
+  venice:
+    model: tts-kokoro        # tts-elevenlabs-turbo-v2-5, tts-orpheus, tts-qwen3-*, …
+    voice: af_heart
+    api_key_file: ~/.config/marmalade-tts/venice-api-key   # chmod 600
+    api_key_env: VENICE_API_KEY   # fallback if the key file is absent
+    timeout: 30
+```
+
+Being stateless, it accepts per-request `model` / `voice` / `speed`
+overrides instead of refusing mismatches the way the model-loading daemons
+do, and it re-reads the key on every request (so adding one needs no
+restart). Requests over Venice's 4096-character input limit are rejected
+locally with a clear error rather than silently re-chunked. A missing key
+isn't fatal: the daemon starts, logs it, and errors each request.
+
+**Privacy:** cloud TTS sends your text to Venice's servers. It's opt-in —
+the local engines are unaffected. For the CLI itself, use the
+[`api`](#api) engine; `venice` is only for daemon clients.
+
 ---
 
 ## Configuration
@@ -747,6 +789,13 @@ engines:
     device: cpu
     voice: paige             # EmojiVoice speaker checkpoint
     daemon: false            # true keeps the model in RAM (recommended)
+
+  venice:                    # daemon-only cloud engine — see Daemon Mode
+    model: tts-kokoro        # sends your text to Venice's servers
+    voice: af_heart
+    api_key_file: ~/.config/marmalade-tts/venice-api-key   # chmod 600
+    api_key_env: VENICE_API_KEY
+    timeout: 30
 
 effects:
   defaults:

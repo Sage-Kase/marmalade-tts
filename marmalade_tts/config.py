@@ -78,6 +78,17 @@ DEFAULT_CONFIG = {
             # timeout: 120
             # extra: {}             # provider-specific payload passthrough
         },
+        # Daemon-only engine (no CLI engine class — the CLI reaches Venice
+        # through `api`). It serves Venice over the marmalade-tts socket
+        # protocol so any daemon client can use cloud TTS unchanged.
+        # Sends text to Venice's servers; opt-in, nothing else changes.
+        "venice": {
+            "model": "tts-kokoro",
+            "voice": "af_heart",
+            "api_key_file": "~/.config/marmalade-tts/venice-api-key",
+            "api_key_env": "VENICE_API_KEY",
+            "timeout": 30,
+        },
     },
     # Aliases: named bundles (engine + voice + speed + …) invoked positionally
     # like an engine name — e.g. `marmalade-tts narrator "Once upon a time"`.

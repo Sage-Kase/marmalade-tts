@@ -27,6 +27,10 @@ ENGINE_DAEMONS = {
     "coqui":      ("coqui.sock",  "coqui.pid",  "marmalade-coqui.service",  "coqui-daemon.py"),
     "matcha":     ("matcha.sock", "matcha.pid", "marmalade-matcha.service", "matcha-daemon.py"),
     "emojivoice": ("emojivoice.sock", "emojivoice.pid", "marmalade-emojivoice.service", "emojivoice-daemon.py"),
+    # Cloud engine: no model, no venv — it serves the same socket protocol
+    # for clients on hardware too weak to hold a local model. There is no
+    # `venice` CLI engine; the CLI reaches Venice through `api`.
+    "venice":     ("venice.sock", "venice.pid", "marmalade-venice.service", "venice-daemon.py"),
 }
 
 # Engine → Python interpreter to use for the daemon script.
@@ -52,6 +56,8 @@ ENGINE_PYTHON = {
     "emojivoice": [
         os.path.expanduser("~/.local/share/emojivoice-venv/bin/python"),
     ],
+    # No `venice` entry on purpose: the venice daemon is stdlib-only, so
+    # _find_python falls through to the system python3.
 }
 
 
@@ -198,6 +204,19 @@ def _daemon_env(engine: str) -> dict:
         ckpt = f"emoji-hri-{eng.get('voice', 'paige')}-inference.ckpt"
         return {"EMOJIVOICE_CKPT": os.path.expanduser(
             os.path.join("~/.local/share/emojivoice/models", ckpt))}
+    if engine == "venice":
+        # Cloud engine — these are request defaults and key location, not a
+        # model to load. The daemon re-reads the key per request, so only
+        # model/voice changes need a restart.
+        return {
+            "VENICE_MODEL": str(eng.get("model", "tts-kokoro")),
+            "VENICE_VOICE": str(eng.get("voice", "af_heart")),
+            "VENICE_API_KEY_FILE": os.path.expanduser(str(
+                eng.get("api_key_file",
+                        "~/.config/marmalade-tts/venice-api-key"))),
+            "VENICE_API_KEY_ENV": str(eng.get("api_key_env", "VENICE_API_KEY")),
+            "VENICE_TIMEOUT": str(eng.get("timeout", 30)),
+        }
     return {}
 
 

@@ -6,6 +6,24 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`venice` daemon — cloud TTS over the daemon socket protocol.**
+  `marmalade-tts daemon start --engine venice` serves Venice's
+  `/audio/speech` API on `~/.local/share/marmalade-tts/venice.sock`, in the
+  same newline-JSON shape as the local engine daemons. Any existing daemon
+  client gets cloud TTS with zero code changes — for hardware too weak to
+  hold a model in RAM, or for voices better than local kokoro/piper.
+  Stateless, so it honors per-request `model`/`voice`/`speed` overrides
+  instead of the model-identity refusal the loading daemons use, and it
+  re-reads the key every request. The key comes from a 0600
+  `api_key_file` (default `~/.config/marmalade-tts/venice-api-key`) or the
+  `api_key_env` env var; a missing key logs a warning and errors each
+  request rather than crash-looping under systemd. Input over Venice's
+  4096-character limit is rejected locally, and a model that ignores
+  `response_format=wav` errors instead of writing unplayable audio.
+  stdlib-only (urllib), so there is no venv and no install step. Configured
+  under `engines.venice`; a `systemd/marmalade-venice.service` unit ships
+  but is not installed. **Sends your text to Venice's servers** — opt-in,
+  local engines unaffected. The CLI's Venice path is still the `api` engine.
 - **`--lang` and `--lang auto` for kitten.** Kitten phonemizes through
   espeak like kokoro does, so pointing espeak at another language really
   changes the pronunciation — accented, since the model only ever learned
