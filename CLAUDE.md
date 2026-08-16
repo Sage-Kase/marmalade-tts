@@ -1,5 +1,21 @@
 # marmalade-tts-cli — project notes for Claude
 
+## Cross-repo conventions live in the core repo
+
+The rules that bind **every** marmalade repo — secrets, wire contract, security
+invariants, testing — are a linked documentation tree in the core `marmalade`
+repo (checked out at `~/coding/marmalade/marmalade`). **Enter at
+`docs/README.md` and follow the links down.** Those pages are authority: don't
+reinvent a decision that already has one.
+
+The rule that bites this repo: **credentials resolve through a configurable
+command whose documented default is `marmalade secret get <entry>`** — never a
+bespoke key file, env var, or hardcoded password-manager call. The Venice
+engine's `api_key_file` (`~/.config/marmalade-tts/venice-api-key`, 0600)
+predates that rule and is tracked for migration to a
+`venice/api-key` keyring entry; see `docs/conventions/secrets.md` in the core
+repo. **Do not add a third mechanism in the meantime.**
+
 ## Remotes
 
 **github is the authoritative remote.** Push only to `github` (`git push github main`).
