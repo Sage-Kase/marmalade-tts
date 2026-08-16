@@ -85,6 +85,11 @@ DEFAULT_CONFIG = {
         "venice": {
             "model": "tts-kokoro",
             "voice": "af_heart",
+            # Key resolution order: command, then 0600 file, then env var.
+            # The command default is the marmalade keyring (one secrets
+            # mechanism across every marmalade repo — see the core repo's
+            # docs/conventions/secrets.md). Fails soft to the fallbacks.
+            "api_key_cmd": "marmalade secret get venice/api-key",
             "api_key_file": "~/.config/marmalade-tts/venice-api-key",
             "api_key_env": "VENICE_API_KEY",
             "timeout": 30,

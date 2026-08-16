@@ -628,8 +628,9 @@ engines:
   venice:
     model: tts-kokoro        # tts-elevenlabs-turbo-v2-5, tts-orpheus, tts-qwen3-*, …
     voice: af_heart
-    api_key_file: ~/.config/marmalade-tts/venice-api-key   # chmod 600
-    api_key_env: VENICE_API_KEY   # fallback if the key file is absent
+    api_key_cmd: marmalade secret get venice/api-key   # the marmalade keyring; fails soft
+    api_key_file: ~/.config/marmalade-tts/venice-api-key   # fallback (chmod 600)
+    api_key_env: VENICE_API_KEY   # last fallback
     timeout: 30
 ```
 
@@ -793,7 +794,8 @@ engines:
   venice:                    # daemon-only cloud engine — see Daemon Mode
     model: tts-kokoro        # sends your text to Venice's servers
     voice: af_heart
-    api_key_file: ~/.config/marmalade-tts/venice-api-key   # chmod 600
+    api_key_cmd: marmalade secret get venice/api-key   # the marmalade keyring
+    api_key_file: ~/.config/marmalade-tts/venice-api-key   # fallback (chmod 600)
     api_key_env: VENICE_API_KEY
     timeout: 30
 

@@ -211,6 +211,8 @@ def _daemon_env(engine: str) -> dict:
         return {
             "VENICE_MODEL": str(eng.get("model", "tts-kokoro")),
             "VENICE_VOICE": str(eng.get("voice", "af_heart")),
+            "VENICE_API_KEY_CMD": str(
+                eng.get("api_key_cmd", "marmalade secret get venice/api-key")),
             "VENICE_API_KEY_FILE": os.path.expanduser(str(
                 eng.get("api_key_file",
                         "~/.config/marmalade-tts/venice-api-key"))),

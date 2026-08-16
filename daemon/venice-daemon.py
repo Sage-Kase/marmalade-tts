@@ -23,9 +23,16 @@ Configuration arrives as environment variables (set from ``engines.venice``
 in config.yaml by marmalade_tts/daemon.py, or by the systemd unit):
   VENICE_MODEL         default synthesis model      (tts-kokoro)
   VENICE_VOICE         default voice                (af_heart)
+  VENICE_API_KEY_CMD   command whose stdout is the key
+                       (marmalade secret get venice/api-key — the marmalade
+                       keyring; see the core repo's docs/conventions/secrets.md)
   VENICE_API_KEY_FILE  0600 file holding the key    (~/.config/marmalade-tts/venice-api-key)
   VENICE_API_KEY_ENV   env var holding the key      (VENICE_API_KEY)
   VENICE_TIMEOUT       per-request timeout, seconds (30)
+
+Key resolution order: command → file → env. A successful command result is
+cached for the daemon's lifetime (the command spawns a process; per-request
+would add latency for no rotation benefit — restart to rotate).
 
 A missing key is NOT fatal: the daemon starts, says so in its log, and
 fails each request with a clear error. Exiting instead would crash-loop
@@ -57,6 +64,8 @@ _ERR_BODY_CHARS = 300
 
 DEFAULT_MODEL = os.environ.get("VENICE_MODEL", "tts-kokoro")
 DEFAULT_VOICE = os.environ.get("VENICE_VOICE", "af_heart")
+KEY_CMD = os.environ.get("VENICE_API_KEY_CMD",
+                         "marmalade secret get venice/api-key")
 KEY_FILE = os.path.expanduser(
     os.environ.get("VENICE_API_KEY_FILE",
                    "~/.config/marmalade-tts/venice-api-key"))
@@ -72,8 +81,39 @@ log = logging.getLogger("venice-daemon")
 
 
 def _no_key_error() -> str:
-    return (f"venice: no API key configured (write it to {KEY_FILE} with "
-            f"mode 0600, or set the {KEY_ENV} environment variable)")
+    return (f"venice: no API key configured (store it with `marmalade secret "
+            f"set venice/api-key`, write it to {KEY_FILE} with mode 0600, or "
+            f"set the {KEY_ENV} environment variable)")
+
+
+_cmd_key_cache: "str | None" = None
+
+
+def _key_from_command() -> "str | None":
+    """Run KEY_CMD; its stdout (stripped) is the secret.
+
+    Fails soft on every path — no command configured, missing binary,
+    non-zero exit, empty stdout, timeout — so the file/env fallbacks apply.
+    stdin is /dev/null with a hard timeout: a backend that wants to prompt
+    (a locked password store) must fail here, not hang the request. The
+    secret never hits a log. Success is cached for the daemon's lifetime.
+    """
+    global _cmd_key_cache
+    if _cmd_key_cache:
+        return _cmd_key_cache
+    if not KEY_CMD.strip():
+        return None
+    import shlex
+    import subprocess
+    try:
+        out = subprocess.run(shlex.split(KEY_CMD), capture_output=True,
+                             stdin=subprocess.DEVNULL, timeout=10)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    if out.returncode != 0:
+        return None
+    _cmd_key_cache = out.stdout.decode("utf-8", "replace").strip() or None
+    return _cmd_key_cache
 
 
 def _key_from_file() -> str | None:
@@ -93,9 +133,10 @@ def _key_from_file() -> str | None:
 
 
 def api_key() -> str | None:
-    """The key file wins over the env var; both are read per request so a
-    key added after startup takes effect without a restart."""
-    return _key_from_file() or (os.environ.get(KEY_ENV) or "").strip() or None
+    """Command (cached) → key file → env var. The file and env are read per
+    request so a key added after startup takes effect without a restart."""
+    return (_key_from_command() or _key_from_file()
+            or (os.environ.get(KEY_ENV) or "").strip() or None)
 
 
 def _post(payload: dict, key: str) -> bytes:

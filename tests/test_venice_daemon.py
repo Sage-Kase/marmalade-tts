@@ -59,6 +59,11 @@ def api(monkeypatch):
     handle.requests = []
     monkeypatch.setattr(venice_daemon.urllib.request, "urlopen",
                         handle.urlopen)
+    # Neutralize the key COMMAND (default: the marmalade keyring) — on a dev
+    # box it can genuinely succeed, which would shadow the file/env paths
+    # these tests steer. Cmd-resolution has its own test class below.
+    monkeypatch.setattr(venice_daemon, "KEY_CMD", "")
+    monkeypatch.setattr(venice_daemon, "_cmd_key_cache", None)
     monkeypatch.setattr(venice_daemon, "KEY_FILE", "/nonexistent/key")
     monkeypatch.setattr(venice_daemon, "KEY_ENV", "MARMALADE_TEST_VENICE_KEY")
     monkeypatch.setenv("MARMALADE_TEST_VENICE_KEY", "test-key")
@@ -315,3 +320,50 @@ class TestRegistration:
         import marmalade_tts.daemon as daemon_mod
         # stdlib-only daemon: _find_python falls through to system python3.
         assert "venice" not in daemon_mod.ENGINE_PYTHON
+
+
+# ── command-based key resolution (the marmalade keyring convention) ─────────
+# Order: cmd → file → env. Default cmd is `marmalade secret get
+# venice/api-key`; every failure mode falls through to the older sources.
+
+class TestKeyCommand:
+    def test_command_wins_over_file_and_env(self, api, monkeypatch):
+        monkeypatch.setattr(venice_daemon, "KEY_CMD", "printf cmd-key")
+        assert venice_daemon.api_key() == "cmd-key"
+
+    def test_failing_command_falls_back_to_env(self, api, monkeypatch):
+        monkeypatch.setattr(venice_daemon, "KEY_CMD", "false")
+        assert venice_daemon.api_key() == "test-key"
+
+    def test_missing_binary_falls_back(self, api, monkeypatch):
+        monkeypatch.setattr(venice_daemon, "KEY_CMD",
+                            "definitely-not-a-real-binary-9f2 get x")
+        assert venice_daemon.api_key() == "test-key"
+
+    def test_empty_stdout_is_not_a_key(self, api, monkeypatch):
+        monkeypatch.setattr(venice_daemon, "KEY_CMD", "printf ''")
+        assert venice_daemon.api_key() == "test-key"
+
+    def test_success_is_cached_for_daemon_lifetime(self, api, monkeypatch,
+                                                   tmp_path):
+        marker = tmp_path / "ran"
+        monkeypatch.setattr(
+            venice_daemon, "KEY_CMD",
+            f"sh -c 'echo run >> {marker}; printf cmd-key'")
+        assert venice_daemon.api_key() == "cmd-key"
+        assert venice_daemon.api_key() == "cmd-key"
+        assert marker.read_text().count("run") == 1
+
+    def test_default_cmd_is_the_marmalade_keyring(self):
+        # The shipped default, independent of this test env's overrides.
+        import importlib.util as _ilu
+        spec = _ilu.spec_from_file_location("venice_daemon_fresh", _DAEMON_PATH)
+        fresh = _ilu.module_from_spec(spec)
+        # A stray VENICE_API_KEY_CMD in the test env would leak in; pin it out.
+        old = os.environ.pop("VENICE_API_KEY_CMD", None)
+        try:
+            spec.loader.exec_module(fresh)
+        finally:
+            if old is not None:
+                os.environ["VENICE_API_KEY_CMD"] = old
+        assert fresh.KEY_CMD == "marmalade secret get venice/api-key"
