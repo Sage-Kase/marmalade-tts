@@ -31,6 +31,12 @@ ENGINE_DAEMONS = {
     # for clients on hardware too weak to hold a local model. There is no
     # `venice` CLI engine; the CLI reaches Venice through `api`.
     "venice":     ("venice.sock", "venice.pid", "marmalade-venice.service", "venice-daemon.py"),
+    # Not an engine: the streaming session front end (marmalade_tts/
+    # stream_daemon.py). It holds no model — it plans a live stream and
+    # fronts whichever engine daemon the request names — but it is
+    # started, stopped and status-checked exactly like the others, so it
+    # lives in the same table (`daemon start --engine stream`).
+    "stream":     ("stream.sock", "stream.pid", "marmalade-stream.service", "stream-daemon.py"),
 }
 
 # Engine → Python interpreter to use for the daemon script.
@@ -56,8 +62,9 @@ ENGINE_PYTHON = {
     "emojivoice": [
         os.path.expanduser("~/.local/share/emojivoice-venv/bin/python"),
     ],
-    # No `venice` entry on purpose: the venice daemon is stdlib-only, so
-    # _find_python falls through to the system python3.
+    # No `venice`/`stream` entries on purpose: neither daemon loads a
+    # model (venice is stdlib-only, stream imports marmalade_tts itself),
+    # so _find_python falls through to the system python3.
 }
 
 

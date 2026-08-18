@@ -1,0 +1,15 @@
+[Unit]
+Description=Marmalade TTS — streaming session daemon (fronts the engine daemons)
+
+[Service]
+Type=simple
+# No venv: the daemon holds no model. It runs the marmalade_tts planning
+# machinery on the system python and reaches the engine daemons over their
+# own sockets, one request per chunk.
+ExecStart=/usr/bin/python3 \
+    %h/.local/share/marmalade-tts/daemon/stream-daemon.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

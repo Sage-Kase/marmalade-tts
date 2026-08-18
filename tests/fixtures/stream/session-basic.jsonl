@@ -1,0 +1,8 @@
+{"dir": "in", "msg": {"engine": "fake", "id": "utt-1", "op": "speak"}}
+{"dir": "in", "msg": {"id": "utt-1", "op": "text", "text": "One one one."}}
+{"dir": "out", "msg": {"dur_ms": "<dur_ms>", "ev": "chunk", "id": "utt-1", "sentence": 0, "seq": 0, "text": "One one one.", "wav": "<wav>"}}
+{"dir": "out", "msg": {"ev": "start", "id": "utt-1"}}
+{"dir": "in", "msg": {"id": "utt-1", "op": "text", "text": "Two two two."}}
+{"dir": "out", "msg": {"dur_ms": "<dur_ms>", "ev": "chunk", "id": "utt-1", "sentence": 1, "seq": 1, "text": "Two two two.", "wav": "<wav>"}}
+{"dir": "in", "msg": {"id": "utt-1", "op": "end"}}
+{"dir": "out", "msg": {"ev": "done", "id": "utt-1"}}
