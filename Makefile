@@ -58,6 +58,7 @@ deb: systemd-system
 		$(SYSTEMD_SYSTEM_DIR)/marmalade-kokoro.service=/usr/lib/systemd/user/marmalade-kokoro.service \
 		$(SYSTEMD_SYSTEM_DIR)/marmalade-piper.service=/usr/lib/systemd/user/marmalade-piper.service \
 		$(SYSTEMD_SYSTEM_DIR)/marmalade-coqui.service=/usr/lib/systemd/user/marmalade-coqui.service \
+		$(SYSTEMD_SYSTEM_DIR)/marmalade-stream.service=/usr/lib/systemd/user/marmalade-stream.service \
 		scripts/speak-selection=/usr/share/marmalade-tts/scripts/speak-selection \
 		scripts/speak-clipboard=/usr/share/marmalade-tts/scripts/speak-clipboard \
 		scripts/marmalade-pipe=/usr/share/marmalade-tts/scripts/marmalade-pipe
@@ -82,7 +83,8 @@ rpm: systemd-system
 		$(SYSTEMD_SYSTEM_DIR)/marmalade-kitten.service=/usr/lib/systemd/user/marmalade-kitten.service \
 		$(SYSTEMD_SYSTEM_DIR)/marmalade-kokoro.service=/usr/lib/systemd/user/marmalade-kokoro.service \
 		$(SYSTEMD_SYSTEM_DIR)/marmalade-piper.service=/usr/lib/systemd/user/marmalade-piper.service \
-		$(SYSTEMD_SYSTEM_DIR)/marmalade-coqui.service=/usr/lib/systemd/user/marmalade-coqui.service
+		$(SYSTEMD_SYSTEM_DIR)/marmalade-coqui.service=/usr/lib/systemd/user/marmalade-coqui.service \
+		$(SYSTEMD_SYSTEM_DIR)/marmalade-stream.service=/usr/lib/systemd/user/marmalade-stream.service
 
 install:
 	bash install.sh
