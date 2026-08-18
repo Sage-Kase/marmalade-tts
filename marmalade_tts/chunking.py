@@ -130,12 +130,19 @@ def _clause_units(text: str) -> list[str]:
     return units
 
 
-def chunk_for_streaming(text: str, max_chars: int) -> list[str]:
+def chunk_for_streaming(text: str, max_chars: int,
+                        step: int = 0) -> list[str]:
     """Chunk ``text`` for streamed playback: clause-boundary cuts only,
     with ramped sizes (small first for time-to-first-audio, growing after).
 
     A clause unit longer than ``max_chars`` falls back to ``chunk_text``
     word-splitting for that unit — unavoidable, and rare in real prose.
+
+    ``step`` offsets the ramp, for a caller that has already streamed
+    ``step`` chunks of the same utterance and is chunking a later fragment
+    of it (``stream_session.plan_fragment``): the ramp is a per-utterance
+    curve, not a per-call one, so restarting it at 0 for every fragment
+    would hold chunk sizes at the small opening targets forever.
     """
     units: list[str] = []
     for u in _clause_units(text):
@@ -149,7 +156,7 @@ def chunk_for_streaming(text: str, max_chars: int) -> list[str]:
     out: list[str] = []
     cur = ""
     for u in units:
-        target = _STREAM_RAMP[min(len(out), len(_STREAM_RAMP) - 1)]
+        target = _STREAM_RAMP[min(step + len(out), len(_STREAM_RAMP) - 1)]
         target = min(target, max_chars)
         if cur and len(cur) + 1 + len(u) > target:
             out.append(cur)
