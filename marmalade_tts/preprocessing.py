@@ -342,6 +342,101 @@ def _html_strip(text: str) -> str:
     return text
 
 
+# ── Line breaks ──────────────────────────────────────────────────────────────
+# espeak does NOT treat a newline as a sentence end ("Title\nFirst line" is
+# read as one run-on clause), and the chunkers only cut at a newline if it
+# survives to them. So line breaks are resolved here, in text, for every
+# engine: a line that ends without punctuation gets a period when the next
+# line plainly starts something new (blank line, list/heading marker,
+# capital, digit, opening quote); otherwise the break is a soft wrap (hard-
+# wrapped prose) and becomes a space. Lines already ending in punctuation
+# keep their newline — the chunkers treat it as a boundary and a trailing
+# comma marks a list continuation (chunking.clause_chunks).
+#
+# Runs BEFORE markdown stripping so bullet/heading markers can still be seen.
+# Known misfire: a hard-wrapped line breaking before a capitalized word
+# ("the\nUnited States") gets a period.
+_LINE_MARKER = re.compile(r"^[ \t]*(?:[-*+]|#{1,6}|>|\d+[.)])[ \t]")
+_LINE_ENDS_PUNCT = re.compile(r"[.!?;:,—…][\"'”’)\]]*$")
+_SOFT_WRAP_NEXT = re.compile(r"^[a-z]")
+
+
+def _linebreaks(text: str) -> str:
+    lines = text.split("\n")
+    out: list[str] = []
+    for i, line in enumerate(lines):
+        cur = line.rstrip()
+        nxt = next((l for l in lines[i + 1:] if l.strip()), None)
+        if not cur.strip() or nxt is None or _LINE_ENDS_PUNCT.search(cur):
+            out.append(cur)
+            continue
+        paragraph = not lines[i + 1].strip()   # blank line follows
+        new_item = bool(_LINE_MARKER.match(nxt)) or bool(_LINE_MARKER.match(cur))
+        if (paragraph or new_item
+                or not _SOFT_WRAP_NEXT.match(nxt.lstrip())):
+            out.append(cur + ".")
+        else:
+            out.append(cur + " \x00")   # soft wrap: joined below
+    return "\n".join(out).replace(" \x00\n", " ")
+
+
+# ── Parentheses ──────────────────────────────────────────────────────────────
+# A parenthetical is an aside the speaker sets off with a pause on each
+# side, but kitten's token vocabulary has no brackets (they vanish, no
+# pause at all) and the chunkers never cut at them. Rewrite "(aside)" as a
+# semicolon-delimited clause: `;` is a real render boundary with a clause
+# gap on kitten (chunking.clause_chunks) and a natural pause on kokoro.
+# "He left (quietly) and came back." → "He left; quietly; and came back."
+# Tiny groups — "item(s)", "f(x)", "(a)" markers — just lose their brackets.
+_PAREN_GROUP = re.compile(r"[ \t]*\(([^()\n]*)\)")
+_PAREN_MAX_GLUE = 2   # inner text this short is glued, not set off
+
+
+def _parens_sub(m: re.Match) -> str:
+    inner = m.group(1).strip()
+    if len(inner) <= _PAREN_MAX_GLUE:
+        return inner
+    before = m.string[:m.start()].rstrip(" \t")
+    after = m.string[m.end():].lstrip(" \t")
+    if not before or before.endswith("\n"):
+        lead = ""
+    elif before[-1] in ".!?;:,—-":
+        lead = " "
+    else:
+        lead = "; "
+    tail = ";" if after and after[0] not in ".!?;:,)\n" else ""
+    return lead + inner + tail
+
+
+def _parens(text: str) -> str:
+    return _PAREN_GROUP.sub(_parens_sub, text)
+
+
+# ── Built-in respellings ─────────────────────────────────────────────────────
+# Words espeak's letter-to-sound fallback gets wrong, respelled so every
+# espeak-backed engine reads them right (the user dictionary in
+# pronunciations.yaml layers on top of this). Keys lowercase; a capitalized
+# match keeps its capital. Verified with tools/ph_probe.py — add entries
+# only with the probe's before/after in hand.
+_RESPELL = {
+    # The bi- prefix before a w/m/y stem: /bɪ/ instead of /baɪ/.
+    "biweekly": "bi-weekly",
+    "bimonthly": "bi-monthly",
+    "biyearly": "bi-yearly",
+}
+_RESPELL_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(k) for k in sorted(_RESPELL, key=len, reverse=True))
+    + r")\b", re.IGNORECASE)
+
+
+def _respell(text: str) -> str:
+    def _sub(m: re.Match) -> str:
+        word = m.group(0)
+        rep = _RESPELL[word.lower()]
+        return rep[0].upper() + rep[1:] if word[0].isupper() else rep
+    return _RESPELL_RE.sub(_sub, text)
+
+
 # ── Pronunciation dictionary ─────────────────────────────────────────────────
 # User-editable YAML at ~/.config/marmalade-tts/pronunciations.yaml. Loaded
 # lazily on first use, cached for the rest of the process — restart marmalade
@@ -469,6 +564,12 @@ RULES = {
                       "\"loudly crying face\" etc.)"),
     # Whole-text transforms. Pattern is None — dispatcher calls the function
     # directly with the full string instead of going through re.sub.
+    "linebreaks":    (None, _linebreaks,
+                      "Unpunctuated line ends become sentence ends; soft wraps join"),
+    "parens":        (None, _parens,
+                      "Parentheticals become ;-delimited clauses (pause + chunk seam)"),
+    "respell":       (None, _respell,
+                      "Built-in respellings for words espeak misreads (biweekly → bi-weekly)"),
     "markdown":      (None, _markdown,
                       "Strip markdown formatting (bold/italic/code/link/heading/list/quote)"),
     "html":          (None, _html_strip,
@@ -484,7 +585,7 @@ RULES = {
 
 ENGINE_PROFILES = {
     "kitten": [
-        "markdown", "html",
+        "linebreaks", "markdown", "html", "parens", "respell",
         "currency", "percentage", "ordinal", "time", "date",
         "email", "url", "filename", "abbreviation", "number",
         "pronounce",
@@ -492,7 +593,7 @@ ENGINE_PROFILES = {
     ],
     "kokoro": [
         # Kokoro (via misaki) handles numbers, abbreviations, and some symbols natively
-        "markdown", "html",
+        "linebreaks", "markdown", "html", "parens", "respell",
         "currency", "percentage", "time", "date",
         "email", "url", "filename",
         "pronounce",
@@ -500,7 +601,7 @@ ENGINE_PROFILES = {
     ],
     "piper": [
         # Piper handles almost nothing — needs everything
-        "markdown", "html",
+        "linebreaks", "markdown", "html", "parens", "respell",
         "currency", "percentage", "ordinal", "time", "date",
         "email", "url", "filename", "abbreviation", "number",
         "pronounce",
@@ -508,7 +609,7 @@ ENGINE_PROFILES = {
     ],
     "coqui": [
         # Coqui handles basic numbers but not much else
-        "markdown", "html",
+        "linebreaks", "markdown", "html", "parens", "respell",
         "currency", "percentage", "time", "date",
         "email", "url", "filename", "abbreviation",
         "pronounce",
@@ -516,7 +617,7 @@ ENGINE_PROFILES = {
     ],
     "pocket": [
         # Pocket doesn't handle any text normalization natively
-        "markdown", "html",
+        "linebreaks", "markdown", "html", "parens", "respell",
         "currency", "percentage", "ordinal", "time", "date",
         "email", "url", "filename", "abbreviation", "number",
         "pronounce",
@@ -524,7 +625,7 @@ ENGINE_PROFILES = {
     ],
     "matcha": [
         # Matcha-TTS only phonemizes — it normalizes nothing, so apply everything.
-        "markdown", "html",
+        "linebreaks", "markdown", "html", "parens", "respell",
         "currency", "percentage", "ordinal", "time", "date",
         "email", "url", "filename", "abbreviation", "number",
         "pronounce",
@@ -536,7 +637,7 @@ ENGINE_PROFILES = {
         # the emotion emoji itself (parse_emoji in the engine maps it to the
         # speaker id and strips it). Stripping it here would force every
         # utterance to the neutral speaker.
-        "markdown", "html",
+        "linebreaks", "markdown", "html", "parens", "respell",
         "currency", "percentage", "ordinal", "time", "date",
         "email", "url", "filename", "abbreviation", "number",
         "pronounce",
@@ -545,7 +646,7 @@ ENGINE_PROFILES = {
     "api": [
         # Hosted models (Venice default = Kokoro) normalize numbers and
         # abbreviations natively — same profile as local kokoro.
-        "markdown", "html",
+        "linebreaks", "markdown", "html", "parens", "respell",
         "currency", "percentage", "time", "date",
         "email", "url", "filename",
         "pronounce",
@@ -587,13 +688,16 @@ def preprocess(text: str, engine: str = None, rules: list = None) -> str:
     # 4. Numbers last (catch remaining bare numbers)
     priority = [
         "emoji",                                    # strip emoji first
+        "linebreaks",                               # needs raw lines (bullet markers) — before markdown
         "markdown", "html",                       # strip formatting before URL/number rules
+        "parens",                                   # after markdown (link syntax uses parens)
         "email", "url",                          # capture structured patterns first
         "currency", "percentage",                  # money/percent before generic numbers
         "time", "date", "ordinal",                 # temporal + ordinal before numbers
         "abbreviation",                             # abbreviations before filename (both have dots)
         "filename",                                 # filenames after abbreviations
         "number",                                   # bare numbers last
+        "respell",                                  # built-in respellings, then the user dict on top
         "pronounce",                                # user dict — operates on already-normalized text
         "math", "ampersand", "hashtag",
     ]
@@ -612,7 +716,9 @@ def preprocess(text: str, engine: str = None, rules: list = None) -> str:
             text = re.sub(pattern, func, text)
 
     # Collapse the runs of whitespace any rule (notably "emoji") may have
-    # left behind. Idempotent and harmless when no rule produced extra spaces.
-    text = re.sub(r"\s+", " ", text).strip()
+    # left behind — but keep line breaks: the chunkers treat a newline as a
+    # sentence boundary (after "linebreaks" every surviving one is).
+    text = re.sub(r"[^\S\n]+", " ", text)
+    text = re.sub(r" ?\n[\s]*", "\n", text).strip()
 
     return text

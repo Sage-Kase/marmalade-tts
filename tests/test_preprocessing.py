@@ -814,3 +814,113 @@ class TestEdgeCases:
         # Newlines should survive (or become spaces) — but not cause crashes
         assert isinstance(result, str)
         assert "line" in result.lower() or "Line" in result
+
+
+class TestLinebreaks:
+    """An unpunctuated line end is a sentence end (espeak does not treat a
+    newline as one); a hard-wrapped line joins with a space; every surviving
+    newline reaches the chunkers (the collapse keeps them)."""
+
+    def test_title_into_paragraph_gets_period(self):
+        out = preprocess("Title\nFirst line of para.", rules=["linebreaks"])
+        assert out == "Title.\nFirst line of para."
+
+    def test_unpunctuated_bullets_become_sentences(self):
+        out = preprocess("- item one\n- item two\nNext", engine="kitten")
+        assert out == "item one.\nitem two.\nNext"
+
+    def test_heading_marker_line_gets_period(self):
+        out = preprocess("# Heading\nsome text", engine="kitten")
+        assert out == "Heading.\nsome text"
+
+    def test_paragraph_break_gets_period_and_single_newline(self):
+        out = preprocess("first block\n\n\nsecond block", engine="kitten")
+        assert out == "first block.\nsecond block"
+
+    def test_soft_wrap_joins_with_space(self):
+        out = preprocess("this is hard\nwrapped prose that\ncontinues here.",
+                         rules=["linebreaks"])
+        assert out == "this is hard wrapped prose that continues here."
+
+    def test_punctuated_line_ends_keep_newline(self):
+        text = "Ingredients:\nflour,\nsugar,\nand eggs.\nMix well."
+        assert preprocess(text, engine="kitten") == text
+
+    def test_closing_quote_after_terminal_is_punctuated(self):
+        out = preprocess('"Go."\nHe went', rules=["linebreaks"])
+        assert out == '"Go."\nHe went'
+
+    def test_in_every_profile(self):
+        for name, rules in ENGINE_PROFILES.items():
+            assert "linebreaks" in rules, name
+
+
+class TestParens:
+    """Parentheticals become ;-delimited clauses: kitten has no bracket
+    tokens (they vanish with no pause) and ; is a chunk seam + pause."""
+
+    def test_mid_sentence_aside(self):
+        out = preprocess("He left (quietly) and then returned.", rules=["parens"])
+        assert out == "He left; quietly; and then returned."
+
+    def test_aside_before_terminal_punctuation(self):
+        out = preprocess("He returned (late).", rules=["parens"])
+        assert out == "He returned; late."
+
+    def test_aside_after_comma_keeps_comma(self):
+        out = preprocess("Yes, (mostly) done.", rules=["parens"])
+        assert out == "Yes, mostly; done."
+
+    def test_whole_sentence_in_parens(self):
+        out = preprocess("Done. (Also this.)", rules=["parens"])
+        assert out == "Done. Also this."
+
+    def test_tiny_groups_are_glued(self):
+        out = preprocess("Check the item(s) and f(x).", rules=["parens"])
+        assert out == "Check the items and fx."
+
+    def test_line_start_aside(self):
+        out = preprocess("(note) read me", rules=["parens"])
+        assert out == "note; read me"
+
+    def test_unbalanced_left_alone(self):
+        assert preprocess("a (b c", rules=["parens"]) == "a (b c"
+
+    def test_markdown_link_target_not_mangled(self):
+        out = preprocess("See [the docs](https://example.com) now.",
+                         engine="kitten")
+        assert out == "See the docs now."
+
+    def test_in_every_profile(self):
+        for name, rules in ENGINE_PROFILES.items():
+            assert "parens" in rules, name
+
+
+class TestRespell:
+    """Built-in respellings for words espeak's letter-to-sound misreads
+    (verified with tools/ph_probe.py: biweekly → bˈɪwiːkli, bi-weekly →
+    bˈaɪwˈiːkli)."""
+
+    def test_bi_prefix_words(self):
+        out = preprocess("biweekly bimonthly biyearly", rules=["respell"])
+        assert out == "bi-weekly bi-monthly bi-yearly"
+
+    def test_capital_preserved(self):
+        assert preprocess("Biweekly", rules=["respell"]) == "Bi-weekly"
+
+    def test_whole_word_only(self):
+        assert preprocess("biweeklyish", rules=["respell"]) == "biweeklyish"
+
+    def test_user_dict_layers_on_top(self, tmp_path, monkeypatch):
+        from marmalade_tts import preprocessing as pp
+        f = tmp_path / "p.yaml"
+        f.write_text("bi-weekly: every other week\n")
+        monkeypatch.setattr(pp, "PRONUNCIATIONS_PATH", str(f))
+        monkeypatch.setattr(pp, "_PRONUNCIATIONS", None)
+        monkeypatch.setattr(pp, "_PRONOUNCE_RE", None)
+        out = preprocess("biweekly", rules=["respell", "pronounce"])
+        assert out == "every other week"
+
+    def test_in_every_profile(self):
+        for name, rules in ENGINE_PROFILES.items():
+            assert "respell" in rules, name

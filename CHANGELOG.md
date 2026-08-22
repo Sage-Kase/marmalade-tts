@@ -5,6 +5,21 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Line breaks now mean something.** Preprocessing used to collapse every
+  newline to a space before chunking, and espeak does not treat a newline
+  as a sentence end — so a title ran straight into its paragraph and
+  unpunctuated bullet items ran together. New `linebreaks` rule: an
+  unpunctuated line end becomes a sentence end, hard-wrapped prose joins
+  with a space, and surviving newlines reach the chunkers.
+- **Parentheticals get their pauses.** Kitten's token set has no brackets,
+  so `(aside)` used to vanish with no pause at all. New `parens` rule
+  rewrites a parenthetical as a `;`-delimited clause — a real chunk seam
+  and clause gap on kitten, a natural pause on kokoro.
+- **`biweekly` / `bimonthly` / `biyearly`** were read with /bɪ/ (espeak's
+  letter-to-sound fallback). New `respell` rule with a built-in table;
+  `tools/ph_probe.py` prints the daemon's phoneme string for auditing more.
+
 ### Added
 - **`venice` daemon — cloud TTS over the daemon socket protocol.**
   `marmalade-tts daemon start --engine venice` serves Venice's

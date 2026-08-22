@@ -285,6 +285,7 @@ support should include everything.
 ENGINE_PROFILES = {
     ...
     "myengine": [
+        "linebreaks", "markdown", "html", "parens", "respell",
         "currency", "percentage", "ordinal", "time", "date",
         "email", "url", "filename", "abbreviation", "number",
         "math", "ampersand", "hashtag",
@@ -310,6 +311,11 @@ ENGINE_PROFILES = {
 | `ampersand` | `bread & butter` → `bread and butter` | Ampersand |
 | `hashtag` | `#100` → `number 100` | Hashtags |
 | `emoji` | `hello 🤣` → `hello` | Strip emojis (every engine except `emojivoice`) |
+| `markdown` / `html` | `**bold**` → `bold`, `<p>x</p>` → `x` | Strip formatting |
+| `linebreaks` | `Title\nBody` → `Title.\nBody` | Unpunctuated line ends become sentence ends; hard-wrapped prose joins (espeak ignores newlines) |
+| `parens` | `left (quietly) and` → `left; quietly; and` | Parentheticals become `;` clauses (pause + chunk seam; kitten has no bracket tokens) |
+| `respell` | `biweekly` → `bi-weekly` | Built-in respellings for words espeak misreads (`_RESPELL`; verify additions with `tools/ph_probe.py`) |
+| `pronounce` | per `~/.config/marmalade-tts/pronunciations.yaml` | User pronunciation dictionary |
 
 **Guidance by engine type:**
 - Handles nothing natively → include all rules (like `piper`, `kitten`, `pocket`)
