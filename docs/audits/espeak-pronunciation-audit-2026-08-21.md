@@ -29,8 +29,13 @@ the actual probe output, not a guess.
 
 ## 3. Patterns found
 
-1. **No POS-based heteronym disambiguation at all.** This is the single biggest source of
-   HIGH errors. espeak picks one fixed reading per spelling and never consults context.
+1. **Heteronym disambiguation is a two-word trigger heuristic, not grammar.** This is the
+   single biggest source of HIGH errors. (Correction, 2026-08-21 research pass: espeak does
+   carry `$verb/$noun/$past` variants for ~100 words, selected only when one of ~180
+   closed-class marker words — `the/a/my` → noun, `to/will/I` → verb, `have/was` → past —
+   sits one or two words left. Imperatives, "Please X", open-class subjects, and bare past
+   tense never fire it; `lead/minute/resume/bass/sow/subject/excuse` have no second entry
+   at all. ~43% of minimal pairs come out right.)
    Noun/verb stress pairs that *do* work (`object`, `convict`, `rebel`, `suspect`, `progress`,
    `increase`, `console`, `content`, `desert`, `separate`, `appropriate`, `deliberate`,
    `elaborate`, `moderate`, `escort`, `export`, `extract`, `upset`, `permit`, `refuse`,
