@@ -423,6 +423,37 @@ _RESPELL = {
     "biweekly": "bi-weekly",
     "bimonthly": "bi-monthly",
     "biyearly": "bi-yearly",
+    "bilayer": "bi-layer",
+    "bimorph": "bi-morph",
+    # Other prefix/compound boundaries the fallback mis-syllabifies
+    # (2026-08-21 audit, ~/coding/scratch/pron-audit/report.md).
+    "triennial": "tri-ennial",
+    "coworking": "co-working",
+    "cosign": "co-sign",
+    "deescalate": "de-escalate",
+    "reupload": "re-upload",
+    "smarthome": "smart-home",
+    "macrophage": "macro-phage",
+    "triglyceride": "try-glyceride",
+    # Tech vocabulary
+    "regex": "reg-ex",
+    "cli": "C-L-I",
+    "mkdir": "makedir",
+    "async": "aysync",
+    "numpy": "numpie",
+    "scipy": "sci-pie",
+    "jupyter": "jupiter",
+    # Names, food, medicine
+    "huawei": "wahway",
+    "renault": "renoh",
+    "quinoa": "keen-wah",
+    "penne": "pennay",
+    "linguine": "lin-gweenee",
+    "feta": "fetta",
+    "miso": "meeso",
+    "kimchi": "kimchee",
+    "mochi": "mohchee",
+    "edema": "ee-deema",
 }
 _RESPELL_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(k) for k in sorted(_RESPELL, key=len, reverse=True))
