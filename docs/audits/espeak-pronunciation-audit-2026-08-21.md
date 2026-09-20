@@ -1,6 +1,6 @@
 # espeak-ng / kitten-daemon English pronunciation audit
 
-Probe: `python3 tools/ph_probe.py` in `/home/max/coding/marmalade-tts-cli`
+Probe: `python3 tools/ph_probe.py` from the repo root
 (espeak-ng via phonemizer + `fix_en_phonemes`, i.e. the exact string the model sees).
 Target accent: General American. Dialect variation (e.g. `niche` = /nɪtʃ/) not flagged.
 Known-and-being-fixed `biweekly` / `bimonthly` / `biyearly` excluded.
